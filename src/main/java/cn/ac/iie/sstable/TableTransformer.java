@@ -1,4 +1,4 @@
-package com.csforge.sstable;
+package cn.ac.iie.sstable;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -11,6 +11,8 @@ import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.util.EnumSet;
 import java.util.List;
+
+import static cn.ac.iie.utils.InvokeUtils.readPrivate;
 
 public class TableTransformer {
 
@@ -28,7 +30,8 @@ public class TableTransformer {
         ByteBuffer v = row.get(i).duplicate();
         String ret = "null";
         if (v != null) {
-            EnumSet<ResultSet.Flag> flags = (EnumSet<ResultSet.Flag>) CassandraUtils.readPrivate(results.metadata, "flags");
+            @SuppressWarnings("unchecked")
+            EnumSet<ResultSet.Flag> flags = (EnumSet<ResultSet.Flag>) readPrivate(results.metadata, "flags");
             if (flags.contains(ResultSet.Flag.NO_METADATA)) {
                 ret = "0x" + ByteBufferUtil.bytesToHex(v);
             } else if (results.metadata.names.get(i).type.isCollection()) {

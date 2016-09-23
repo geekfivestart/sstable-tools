@@ -1,33 +1,21 @@
-package com.csforge.sstable;
+package cn.ac.iie.sstable;
 
-import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.Metadata;
-import com.datastax.driver.core.Session;
-import com.datastax.driver.core.TableMetadata;
+import cn.ac.iie.cassandra.CassandraUtils;
+import cn.ac.iie.cassandra.NoSuchKeyspaceException;
+import cn.ac.iie.cassandra.NoSuchTableException;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import com.google.common.collect.MinMaxPriorityQueue;
-import com.google.common.io.CharStreams;
 import jline.console.ConsoleReader;
 import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.statements.CFStatement;
-import org.apache.cassandra.cql3.statements.CreateTableStatement;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.LocalPartitioner;
-import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -43,10 +31,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
-import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -54,38 +40,40 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-public class CassandraUtils {
-    private static final Logger logger = LoggerFactory.getLogger(CassandraUtils.class);
+import static cn.ac.iie.cassandra.CassandraUtils.findSchema;
+import static cn.ac.iie.cassandra.CassandraUtils.ssTableFromName;
+import static cn.ac.iie.utils.InvokeUtils.readPrivate;
+
+/**
+ * SSTable操作工具类
+ */
+public class SSTableUtils {
+    private static final Logger logger = LoggerFactory.getLogger(SSTableUtils.class);
     private static final AtomicInteger cfCounter = new AtomicInteger();
-    public static Map<String, UserType> knownTypes = Maps.newHashMap();
-    public static String cqlOverride = null;
-    private static String FULL_BAR = Strings.repeat("█", 30);
-    private static String EMPTY_BAR = Strings.repeat("░", 30);
+    private static String cqlOverride = null;
+    private static String FULL_BAR = Strings.repeat("*", 30);
+    private static String EMPTY_BAR = Strings.repeat("-", 30);
 
-    static {
-        Config.setClientMode(true);
 
-        // Partitioner is not set in client mode.
-        if (DatabaseDescriptor.getPartitioner() == null)
-            DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
-
-        // need system keyspace metadata registered for functions used in CQL like count/avg/json
-        Schema.instance.setKeyspaceMetadata(SystemKeyspace.metadata());
-
-    }
-
-    public static CFMetaData tableFromBestSource(File sstablePath) throws IOException, NoSuchFieldException, IllegalAccessException {
-        // TODO add CQL/Thrift mechanisms as well
+    /**
+     * 选择最佳的来源并获取表元数据，优先获取cql定义的元数据
+     * @param ssTablePath SSTable文件
+     * @return 返回表元数据
+     * @throws IOException IO异常
+     * @throws NoSuchFieldException 不存在相应属性异常
+     * @throws IllegalAccessException 非法访问权限异常
+     */
+    private static CFMetaData tableFromBestSource(File ssTablePath) throws IOException, NoSuchFieldException, IllegalAccessException {
 
         CFMetaData metadata;
         if (!Strings.isNullOrEmpty(cqlOverride)) {
-            logger.debug("Using override metadata");
+            logger.debug("使用cql覆盖的元数据");
             metadata = CassandraUtils.tableFromCQL(new ByteArrayInputStream(cqlOverride.getBytes()));
         } else {
             InputStream in = findSchema();
             if (in == null) {
-                logger.debug("Using metadata from sstable");
-                metadata = CassandraUtils.tableFromSSTable(sstablePath);
+                logger.debug("使用SSTable元数据");
+                metadata = SSTableUtils.tableFromSSTable(ssTablePath);
             } else {
                 metadata = CassandraUtils.tableFromCQL(in);
             }
@@ -93,93 +81,14 @@ public class CassandraUtils {
         return metadata;
     }
 
-    private static Types getTypes() {
-        if (knownTypes.isEmpty()) {
-            return Types.none();
-        } else {
-            return Types.of(knownTypes.values().toArray(new UserType[0]));
-        }
-    }
 
-    public static InputStream findSchema() throws IOException {
-        String cqlPath = System.getProperty("sstabletools.schema");
-        InputStream in;
-        if (!Strings.isNullOrEmpty(cqlPath)) {
-            in = new FileInputStream(cqlPath);
-        } else {
-            in = Query.class.getClassLoader().getResourceAsStream("schema.cql");
-            if (in == null && new File("schema.cql").exists()) {
-                in = new FileInputStream("schema.cql");
-            }
-        }
-        return in;
-    }
-
-    public static void loadTablesFromRemote(String host, int port) throws IOException {
-        Cluster.Builder builder = Cluster.builder().addContactPoints(host).withPort(port);
-
-        try (Cluster cluster = builder.build(); Session session = cluster.connect()) {
-            Metadata metadata = cluster.getMetadata();
-            IPartitioner partitioner = FBUtilities.newPartitioner(metadata.getPartitioner());
-            if (DatabaseDescriptor.getPartitioner() == null)
-                DatabaseDescriptor.setPartitionerUnsafe(partitioner);
-            for (com.datastax.driver.core.KeyspaceMetadata ksm : metadata.getKeyspaces()) {
-                if(!ksm.getName().equals("system")) {
-                    for (TableMetadata tm : ksm.getTables()) {
-                        CassandraUtils.tableFromCQL(new ByteArrayInputStream(tm.asCQLQuery().getBytes()), tm.getId());
-                    }
-                }
-            }
-        }
-    }
-
-    public static CFMetaData tableFromCQL(InputStream source) throws IOException {
-        return tableFromCQL(source, null);
-    }
-
-    public static CFMetaData tableFromCQL(InputStream source, UUID cfid) throws IOException {
-        String schema = CharStreams.toString(new InputStreamReader(source, "UTF-8"));
-        CFStatement statement = (CFStatement) QueryProcessor.parseStatement(schema);
-        String keyspace = "";
-        try {
-            keyspace = statement.keyspace() == null ? "turtles" : statement.keyspace();
-        } catch (AssertionError e) { // if -ea added we should provide lots of warnings that things probably wont work
-            logger.warn("Remove '-ea' JVM option when using sstable-tools library");
-            keyspace = "turtles";
-        }
-        statement.prepareKeyspace(keyspace);
-        if(Schema.instance.getKSMetaData(keyspace) == null) {
-            Schema.instance.setKeyspaceMetadata(KeyspaceMetadata.create(keyspace, KeyspaceParams.local(), Tables.none(),
-                    Views.none(), getTypes(), Functions.none()));
-        }
-        CFMetaData cfm;
-        if(cfid != null) {
-            cfm = ((CreateTableStatement) statement.prepare().statement).metadataBuilder().withId(cfid).build();
-            KeyspaceMetadata prev = Schema.instance.getKSMetaData(keyspace);
-            List<CFMetaData> tables = Lists.newArrayList(prev.tablesAndViews());
-            tables.add(cfm);
-            Schema.instance.setKeyspaceMetadata(prev.withSwapped(Tables.of(tables)));
-            Schema.instance.load(cfm);
-        } else {
-            cfm = ((CreateTableStatement) statement.prepare().statement).getCFMetaData();
-        }
-        return cfm;
-    }
-
-    public static Object readPrivate(Object obj, String name) throws NoSuchFieldException, IllegalAccessException {
-        Field type = obj.getClass().getDeclaredField(name);
-        type.setAccessible(true);
-        return type.get(obj);
-    }
-
-    public static Object callPrivate(Object obj, String name) throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
-        Method m = obj.getClass().getDeclaredMethod(name);
-        m.setAccessible(true);
-        return m.invoke(obj);
-    }
-
+    /**
+     * 从SSTable中获取表元数据
+     * @param path SSTable文件对象
+     * @return 返回sstable元数据
+     */
     @SuppressWarnings("unchecked")
-    public static CFMetaData tableFromSSTable(File path) throws IOException, NoSuchFieldException, IllegalAccessException {
+    static CFMetaData tableFromSSTable(File path) throws IOException, NoSuchFieldException, IllegalAccessException {
         Preconditions.checkNotNull(path);
         Descriptor desc = Descriptor.fromFilename(path.getAbsolutePath());
 
@@ -201,12 +110,10 @@ public class CassandraUtils {
         Map<ByteBuffer, AbstractType<?>> regularColumns = header.getRegularColumns();
         int id = cfCounter.incrementAndGet();
         CFMetaData.Builder builder = CFMetaData.Builder.create("turtle" + id, "turtles" + id);
-        staticColumns.entrySet().stream()
-                .forEach(entry ->
-                        builder.addStaticColumn(UTF8Type.instance.getString(entry.getKey()), entry.getValue()));
-        regularColumns.entrySet().stream()
-                .forEach(entry ->
-                        builder.addRegularColumn(UTF8Type.instance.getString(entry.getKey()), entry.getValue()));
+        staticColumns.entrySet().forEach(entry ->
+                builder.addStaticColumn(UTF8Type.instance.getString(entry.getKey()), entry.getValue()));
+        regularColumns.entrySet().forEach(entry ->
+                builder.addRegularColumn(UTF8Type.instance.getString(entry.getKey()), entry.getValue()));
         List<AbstractType<?>> partTypes = keyType.getComponents();
         for(int i = 0; i < partTypes.size(); i++) {
             builder.addPartitionKey("partition" + (i > 0 ? i : ""), partTypes.get(i));
@@ -216,16 +123,26 @@ public class CassandraUtils {
         }
         CFMetaData metaData = builder.build();
         Schema.instance.setKeyspaceMetadata(KeyspaceMetadata.create(metaData.ksName, KeyspaceParams.local(),
-                Tables.of(metaData), Views.none(), getTypes(), Functions.none()));
+                Tables.of(metaData), Views.none(), CassandraUtils.getTypes(), Functions.none()));
         return metaData;
     }
 
-    public static <T> Stream<T> asStream(Iterator<T> iter) {
-        Spliterator<T> splititer = Spliterators.spliteratorUnknownSize(iter, Spliterator.IMMUTABLE);
-        return StreamSupport.stream(splititer, false);
+    public static void printSSTables(String keyspaceName, String tableName, boolean includeSymbolicLink)
+            throws NoSuchKeyspaceException, NoSuchTableException {
+        ssTableFromName(keyspaceName, tableName, includeSymbolicLink).forEach(file ->
+                System.out.println(String.format("%s%s isSymbolicLink:%b%s",
+                TableTransformer.ANSI_PURPLE,
+                file.getAbsolutePath(),
+                Files.isSymbolicLink(file.toPath()),
+                TableTransformer.ANSI_RESET)));
     }
 
-    public static String wrapQuiet(String toWrap, boolean color) {
+    private static <T> Stream<T> asStream(Iterator<T> iter) {
+        Spliterator<T> spliterator = Spliterators.spliteratorUnknownSize(iter, Spliterator.IMMUTABLE);
+        return StreamSupport.stream(spliterator, false);
+    }
+
+    private static String wrapQuiet(String toWrap, boolean color) {
         StringBuilder sb = new StringBuilder();
         if (color) {
             sb.append(TableTransformer.ANSI_WHITE);
@@ -240,14 +157,14 @@ public class CassandraUtils {
     }
 
     public static String toDateString(long time, TimeUnit unit, boolean color) {
-        return wrapQuiet(new java.text.SimpleDateFormat("MM/dd/yyyy HH:mm:ss").format(new java.util.Date(unit.toMillis(time))), color);
+        return wrapQuiet(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(unit.toMillis(time))), color);
     }
 
-    public static String toDurationString(long duration, TimeUnit unit, boolean color) {
+    private static String toDurationString(long duration, TimeUnit unit, boolean color) {
         return wrapQuiet(PeriodFormat.getDefault().print(new Duration(unit.toMillis(duration)).toPeriod()), color);
     }
 
-    public static String toByteString(long bytes, boolean si, boolean color) {
+    private static String toByteString(long bytes, boolean si, boolean color) {
         int unit = si ? 1000 : 1024;
         if (bytes < unit) return bytes + " B";
         int exp = (int) (Math.log(bytes) / Math.log(unit));
@@ -256,32 +173,32 @@ public class CassandraUtils {
     }
 
     private static class ValuedByteBuffer {
-        public long value;
-        public ByteBuffer buffer;
+        long value;
+        ByteBuffer buffer;
 
-        public ValuedByteBuffer(ByteBuffer buffer, long value) {
+        ValuedByteBuffer(ByteBuffer buffer, long value) {
             this.value = value;
             this.buffer = buffer;
         }
 
-        public long getValue() {
+        long getValue() {
             return value;
         }
     }
 
     private static Comparator<ValuedByteBuffer> VCOMP = Comparator.comparingLong(ValuedByteBuffer::getValue).reversed();
 
-    public static void printStats(String fname, PrintStream out) throws IOException, NoSuchFieldException, IllegalAccessException {
-        printStats(fname, out, null);
+    public static void printStats(String fName, PrintStream out) throws IOException, NoSuchFieldException, IllegalAccessException {
+        printStats(fName, out, null);
     }
 
-    public static void printStats(String fname, PrintStream out, ConsoleReader console) throws IOException, NoSuchFieldException, IllegalAccessException {
+    private static void printStats(String fName, PrintStream out, ConsoleReader console) throws IOException, NoSuchFieldException, IllegalAccessException {
         boolean color = console == null || console.getTerminal().isAnsiSupported();
         String c = color ? TableTransformer.ANSI_BLUE : "";
         String s = color ? TableTransformer.ANSI_CYAN : "";
         String r = color ? TableTransformer.ANSI_RESET : "";
-        if (new File(fname).exists()) {
-            Descriptor descriptor = Descriptor.fromFilename(fname);
+        if (new File(fName).exists()) {
+            Descriptor descriptor = Descriptor.fromFilename(fName);
 
             Map<MetadataType, MetadataComponent> metadata = descriptor.getMetadataSerializer().deserialize(descriptor, EnumSet.allOf(MetadataType.class));
             ValidationMetadata validation = (ValidationMetadata) metadata.get(MetadataType.VALIDATION);
@@ -290,10 +207,10 @@ public class CassandraUtils {
             CompressionMetadata compression = null;
             File compressionFile = new File(descriptor.filenameFor(Component.COMPRESSION_INFO));
             if (compressionFile.exists())
-                compression = CompressionMetadata.create(fname);
+                compression = CompressionMetadata.create(fName);
             SerializationHeader.Component header = (SerializationHeader.Component) metadata.get(MetadataType.HEADER);
 
-            CFMetaData cfm = tableFromBestSource(new File(fname));
+            CFMetaData cfm = tableFromBestSource(new File(fName));
             SSTableReader reader = SSTableReader.openNoValidation(descriptor, cfm);
             ISSTableScanner scanner = reader.getScanner();
             long bytes = scanner.getLengthInBytes();
@@ -318,18 +235,18 @@ public class CassandraUtils {
             while (scanner.hasNext()) {
                 UnfilteredRowIterator partition = scanner.next();
 
-                long psize = 0;
-                long pcount = 0;
-                int ptombcount = 0;
+                long pSize = 0;
+                long pCount = 0;
+                int pTombCount = 0;
                 partitionCount++;
                 if (!partition.staticRow().isEmpty()) {
                     rowCount++;
-                    pcount++;
-                    psize += partition.staticRow().dataSize();
+                    pCount++;
+                    pSize += partition.staticRow().dataSize();
                 }
                 if (!partition.partitionLevelDeletion().isLive()) {
                     tombstoneCount++;
-                    ptombcount++;
+                    pTombCount++;
                 }
                 while (partition.hasNext()) {
                     Unfiltered unfiltered = partition.next();
@@ -337,8 +254,8 @@ public class CassandraUtils {
                         case ROW:
                             rowCount++;
                             Row row = (Row) unfiltered;
-                            psize += row.dataSize();
-                            pcount++;
+                            pSize += row.dataSize();
+                            pCount++;
                             for (Cell cell : row.cells()) {
                                 cellCount++;
                                 double percentComplete = Math.min(1.0, cellCount / totalCells);
@@ -350,19 +267,19 @@ public class CassandraUtils {
                                 }
                                 if (cell.isTombstone()) {
                                     tombstoneCount++;
-                                    ptombcount++;
+                                    pTombCount++;
                                 }
                             }
                             break;
                         case RANGE_TOMBSTONE_MARKER:
                             tombstoneCount++;
-                            ptombcount++;
+                            pTombCount++;
                             break;
                     }
                 }
-                widestPartitions.add(new ValuedByteBuffer(partition.partitionKey().getKey(), pcount));
-                largestPartitions.add(new ValuedByteBuffer(partition.partitionKey().getKey(), psize));
-                mostTombstones.add(new ValuedByteBuffer(partition.partitionKey().getKey(), ptombcount));
+                widestPartitions.add(new ValuedByteBuffer(partition.partitionKey().getKey(), pCount));
+                largestPartitions.add(new ValuedByteBuffer(partition.partitionKey().getKey(), pSize));
+                mostTombstones.add(new ValuedByteBuffer(partition.partitionKey().getKey(), pTombCount));
             }
             out.printf("\r%80s\r", " ");
             out.printf("%sPartitions%s:%s %s%n", c, s, r, partitionCount);
@@ -370,13 +287,13 @@ public class CassandraUtils {
             out.printf("%sTombstones%s:%s %s%n", c, s, r, tombstoneCount);
             out.printf("%sCells%s:%s %s%n", c, s, r, cellCount);
             out.printf("%sWidest Partitions%s:%s%n", c, s, r);
-            asStream(widestPartitions.iterator()).sorted(VCOMP).forEach(p -> {
-                out.printf("%s   [%s%s%s]%s %s%n", s, r, cfm.getKeyValidator().getString(p.buffer), s, r, p.value);
-            });
+            asStream(widestPartitions.iterator()).sorted(VCOMP).forEach(p ->
+                    out.printf("%s   [%s%s%s]%s %s%n", s, r, cfm.getKeyValidator().getString(p.buffer),
+                            s, r, p.value));
             out.printf("%sLargest Partitions%s:%s%n", c, s, r);
-            asStream(largestPartitions.iterator()).sorted(VCOMP).forEach(p -> {
-                out.printf("%s   [%s%s%s]%s %s %s%n", s, r, cfm.getKeyValidator().getString(p.buffer), s, r, p.value, toByteString(p.value, true, color));
-            });
+            asStream(largestPartitions.iterator()).sorted(VCOMP).forEach(p ->
+                    out.printf("%s   [%s%s%s]%s %s %s%n", s, r, cfm.getKeyValidator().getString(p.buffer),
+                            s, r, p.value, toByteString(p.value, true, color)));
             out.printf("%sTombstone Leaders%s:%s%n", c, s, r);
             asStream(mostTombstones.iterator()).sorted(VCOMP).forEach(p -> {
                 if (p.value > 0) {
@@ -384,69 +301,68 @@ public class CassandraUtils {
                 }
             });
 
+            @SuppressWarnings("unchecked")
             List<AbstractType<?>> clusteringTypes = (List<AbstractType<?>>) readPrivate(header, "clusteringTypes");
             if (validation != null) {
                 out.printf("%sPartitioner%s:%s %s%n", c, s, r, validation.partitioner);
                 out.printf("%sBloom Filter FP chance%s:%s %f%n", c, s, r, validation.bloomFilterFPChance);
             }
-            if (stats != null) {
-                out.printf("%sSize%s:%s %s %s %n", c, s, r, bytes, toByteString(bytes, true, color));
-                out.printf("%sCompressor%s:%s %s%n", c, s, r, compression != null ? compression.compressor().getClass().getName() : "-");
-                if (compression != null)
-                    out.printf("%s  Compression ratio%s:%s %s%n", c, s, r, stats.compressionRatio);
+            out.printf("%sSize%s:%s %s %s %n", c, s, r, bytes, toByteString(bytes, true, color));
+            out.printf("%sCompressor%s:%s %s%n", c, s, r, compression != null ? compression.compressor().getClass().getName() : "-");
+            if (compression != null)
+                out.printf("%s  Compression ratio%s:%s %s%n", c, s, r, stats.compressionRatio);
 
-                out.printf("%sMinimum timestamp%s:%s %s %s%n", c, s, r, stats.minTimestamp, toDateString(stats.minTimestamp, TimeUnit.MICROSECONDS, color));
-                out.printf("%sMaximum timestamp%s:%s %s %s%n", c, s, r, stats.maxTimestamp, toDateString(stats.maxTimestamp, TimeUnit.MICROSECONDS, color));
+            out.printf("%sMinimum timestamp%s:%s %s %s%n", c, s, r, stats.minTimestamp, toDateString(stats.minTimestamp, TimeUnit.MICROSECONDS, color));
+            out.printf("%sMaximum timestamp%s:%s %s %s%n", c, s, r, stats.maxTimestamp, toDateString(stats.maxTimestamp, TimeUnit.MICROSECONDS, color));
 
-                out.printf("%sSSTable min local deletion time%s:%s %s %s%n", c, s, r, stats.minLocalDeletionTime, toDateString(stats.minLocalDeletionTime, TimeUnit.SECONDS, color));
-                out.printf("%sSSTable max local deletion time%s:%s %s %s%n", c, s, r, stats.maxLocalDeletionTime, toDateString(stats.maxLocalDeletionTime, TimeUnit.SECONDS, color));
+            out.printf("%sSSTable min local deletion time%s:%s %s %s%n", c, s, r, stats.minLocalDeletionTime, toDateString(stats.minLocalDeletionTime, TimeUnit.SECONDS, color));
+            out.printf("%sSSTable max local deletion time%s:%s %s %s%n", c, s, r, stats.maxLocalDeletionTime, toDateString(stats.maxLocalDeletionTime, TimeUnit.SECONDS, color));
 
-                out.printf("%sTTL min%s:%s %s %s%n", c, s, r, stats.minTTL, toDurationString(stats.minTTL, TimeUnit.SECONDS, color));
-                out.printf("%sTTL max%s:%s %s %s%n", c, s, r, stats.maxTTL, toDurationString(stats.maxTTL, TimeUnit.SECONDS, color));
-                if (header != null && clusteringTypes.size() == stats.minClusteringValues.size()) {
-                    List<ByteBuffer> minClusteringValues = stats.minClusteringValues;
-                    List<ByteBuffer> maxClusteringValues = stats.maxClusteringValues;
-                    String[] minValues = new String[clusteringTypes.size()];
-                    String[] maxValues = new String[clusteringTypes.size()];
-                    for (int i = 0; i < clusteringTypes.size(); i++) {
-                        minValues[i] = clusteringTypes.get(i).getString(minClusteringValues.get(i));
-                        maxValues[i] = clusteringTypes.get(i).getString(maxClusteringValues.get(i));
-                    }
-                    out.printf("%sminClustringValues%s:%s %s%n", c, s, r, Arrays.toString(minValues));
-                    out.printf("%smaxClustringValues%s:%s %s%n", c, s, r, Arrays.toString(maxValues));
+            out.printf("%sTTL min%s:%s %s %s%n", c, s, r, stats.minTTL, toDurationString(stats.minTTL, TimeUnit.SECONDS, color));
+            out.printf("%sTTL max%s:%s %s %s%n", c, s, r, stats.maxTTL, toDurationString(stats.maxTTL, TimeUnit.SECONDS, color));
+            if (header != null && clusteringTypes.size() == stats.minClusteringValues.size()) {
+                List<ByteBuffer> minClusteringValues = stats.minClusteringValues;
+                List<ByteBuffer> maxClusteringValues = stats.maxClusteringValues;
+                String[] minValues = new String[clusteringTypes.size()];
+                String[] maxValues = new String[clusteringTypes.size()];
+                for (int i = 0; i < clusteringTypes.size(); i++) {
+                    minValues[i] = clusteringTypes.get(i).getString(minClusteringValues.get(i));
+                    maxValues[i] = clusteringTypes.get(i).getString(maxClusteringValues.get(i));
                 }
-                out.printf("%sEstimated droppable tombstones%s:%s %s%n", c, s, r, stats.getEstimatedDroppableTombstoneRatio((int) (System.currentTimeMillis() / 1000)));
-                out.printf("%sSSTable Level%s:%s %d%n", c, s, r, stats.sstableLevel);
-                out.printf("%sRepaired at%s:%s %d %s%n", c, s, r, stats.repairedAt, toDateString(stats.repairedAt, TimeUnit.MILLISECONDS, color));
-                out.printf("  %sLower bound%s:%s %s%n", c, s, r, stats.commitLogLowerBound);
-                out.printf("  %sUpper bound%s:%s %s%n", c, s, r, stats.commitLogUpperBound);
-                out.printf("%stotalColumnsSet%s:%s %s%n", c, s, r, stats.totalColumnsSet);
-                out.printf("%stotalRows%s:%s %s%n", c, s, r, stats.totalRows);
-                out.printf("%sEstimated tombstone drop times%s:%s%n", c, s, r);
-
-                TermHistogram h = new TermHistogram(stats.estimatedTombstoneDropTime.getAsMap().entrySet());
-                String bcolor = color ? "\u001B[36m" : "";
-                String reset = color ? "\u001B[0m" : "";
-                String histoColor = color ? "\u001B[37m" : "";
-                out.printf("%s  %-" + h.maxValueLength + "s                       | %-" + h.maxCountLength + "s   %%   Histogram %n", bcolor, "Value", "Count");
-                stats.estimatedTombstoneDropTime.getAsMap().entrySet().stream().forEach(e -> {
-                    String histo = h.asciiHistogram(e.getValue(), 30);
-                    out.printf(reset +
-                                    "  %-" + h.maxValueLength + "d %s %s|%s %" + h.maxCountLength + "s %s %s%s %n",
-                            e.getKey().longValue(), toDateString(e.getKey().intValue(), TimeUnit.SECONDS, color),
-                            bcolor, reset,
-                            e.getValue(),
-                            wrapQuiet(String.format("%3s", (int) (100 * (e.getValue() / h.sum))), color),
-                            histoColor,
-                            histo);
-                });
-
-                out.printf("%sEstimated partition size%s:%s%n", c, s, r);
-                TermHistogram.printHistogram(stats.estimatedPartitionSize, out, color);
-
-                out.printf("%sEstimated column count%s:%s%n", c, s, r);
-                TermHistogram.printHistogram(stats.estimatedColumnCount, out, color);
+                out.printf("%sminClustringValues%s:%s %s%n", c, s, r, Arrays.toString(minValues));
+                out.printf("%smaxClustringValues%s:%s %s%n", c, s, r, Arrays.toString(maxValues));
             }
+            out.printf("%sEstimated droppable tombstones%s:%s %s%n", c, s, r, stats.getEstimatedDroppableTombstoneRatio((int) (System.currentTimeMillis() / 1000)));
+            out.printf("%sSSTable Level%s:%s %d%n", c, s, r, stats.sstableLevel);
+            out.printf("%sRepaired at%s:%s %d %s%n", c, s, r, stats.repairedAt, toDateString(stats.repairedAt, TimeUnit.MILLISECONDS, color));
+            out.printf("  %sLower bound%s:%s %s%n", c, s, r, stats.commitLogLowerBound);
+            out.printf("  %sUpper bound%s:%s %s%n", c, s, r, stats.commitLogUpperBound);
+            out.printf("%stotalColumnsSet%s:%s %s%n", c, s, r, stats.totalColumnsSet);
+            out.printf("%stotalRows%s:%s %s%n", c, s, r, stats.totalRows);
+            out.printf("%sEstimated tombstone drop times%s:%s%n", c, s, r);
+
+            TermHistogram h = new TermHistogram(stats.estimatedTombstoneDropTime.getAsMap().entrySet());
+            String bcolor = color ? "\u001B[36m" : "";
+            String reset = color ? "\u001B[0m" : "";
+            String histoColor = color ? "\u001B[37m" : "";
+            out.printf("%s  %-" + h.maxValueLength + "s                       | %-" + h.maxCountLength + "s   %%   Histogram %n", bcolor, "Value", "Count");
+            stats.estimatedTombstoneDropTime.getAsMap().entrySet().forEach(e -> {
+                String histo = h.asciiHistogram(e.getValue(), 30);
+                out.printf(reset +
+                                "  %-" + h.maxValueLength + "d %s %s|%s %" + h.maxCountLength + "s %s %s%s %n",
+                        e.getKey().longValue(), toDateString(e.getKey().intValue(), TimeUnit.SECONDS, color),
+                        bcolor, reset,
+                        e.getValue(),
+                        wrapQuiet(String.format("%3s", (int) (100 * (e.getValue() / h.sum))), color),
+                        histoColor,
+                        histo);
+            });
+
+            out.printf("%sEstimated partition size%s:%s%n", c, s, r);
+            TermHistogram.printHistogram(stats.estimatedPartitionSize, out, color);
+
+            out.printf("%sEstimated column count%s:%s%n", c, s, r);
+            TermHistogram.printHistogram(stats.estimatedColumnCount, out, color);
             if (compaction != null) {
                 out.printf("%sEstimated cardinality%s:%s %s%n", c, s, r, compaction.cardinalityEstimator.cardinality());
             }
@@ -475,7 +391,35 @@ public class CassandraUtils {
         }
     }
 
-    public static final TreeMap<Double, String> bars = new TreeMap<Double, String>() {{
+    public static void printTimestampRange(String fName, PrintStream out, ConsoleReader console) throws IOException, NoSuchFieldException, IllegalAccessException {
+        boolean color = console == null || console.getTerminal().isAnsiSupported();
+        String c = color ? TableTransformer.ANSI_BLUE : "";
+        String s = color ? TableTransformer.ANSI_CYAN : "";
+        String r = color ? TableTransformer.ANSI_RESET : "";
+        if (new File(fName).exists()) {
+            Descriptor descriptor = Descriptor.fromFilename(fName);
+            Map<MetadataType, MetadataComponent> metadata = descriptor.getMetadataSerializer().deserialize(descriptor, EnumSet.allOf(MetadataType.class));
+            StatsMetadata stats = (StatsMetadata) metadata.get(MetadataType.STATS);
+
+            if (stats != null) {
+
+                out.printf("%sMinimum timestamp%s:%s %s %s%n", c, s, r, stats.minTimestamp, toDateString(stats.minTimestamp, TimeUnit.MICROSECONDS, color));
+                out.printf("%sMaximum timestamp%s:%s %s %s%n", c, s, r, stats.maxTimestamp, toDateString(stats.maxTimestamp, TimeUnit.MICROSECONDS, color));
+            }
+        }
+    }
+
+    public static Long maxTimestamp(String ssTablePath) throws IOException {
+        Descriptor descriptor = Descriptor.fromFilename(ssTablePath);
+        Map<MetadataType, MetadataComponent> metadata = descriptor.
+                getMetadataSerializer().
+                deserialize(descriptor, EnumSet.allOf(MetadataType.class));
+        StatsMetadata stats = (StatsMetadata) metadata.get(MetadataType.STATS);
+        return stats.maxTimestamp;
+
+    }
+
+    private static final TreeMap<Double, String> bars = new TreeMap<Double, String>() {{
         this.put(7.0 / 8.0, "▉"); // 7/8ths left block
         this.put(3.0 / 4.0, "▊"); // 3/4th block
         this.put(5.0 / 8.0, "▋"); // five eighths
@@ -491,7 +435,7 @@ public class CassandraUtils {
         int maxCountLength = 5;
         int maxValueLength = 5;
 
-        public static void printHistogram(EstimatedHistogram histogram, PrintStream out, boolean colors) {
+        static void printHistogram(EstimatedHistogram histogram, PrintStream out, boolean colors) {
             String bcolor = colors ? "\u001B[36m" : "";
             String reset = colors ? "\u001B[0m" : "";
             String histoColor = colors ? "\u001B[37m" : "";
@@ -515,8 +459,8 @@ public class CassandraUtils {
             }
         }
 
-        public TermHistogram(Collection<Map.Entry<Double, Long>> histogram) {
-            histogram.stream().forEach(e -> {
+        TermHistogram(Collection<Map.Entry<Double, Long>> histogram) {
+            histogram.forEach(e -> {
                 max = Math.max(max, e.getValue());
                 min = Math.min(min, e.getValue());
                 sum += e.getValue();
@@ -525,7 +469,7 @@ public class CassandraUtils {
             });
         }
 
-        public TermHistogram(EstimatedHistogram histogram) {
+        TermHistogram(EstimatedHistogram histogram) {
             long[] counts = histogram.getBuckets(false);
             for (int i = 0; i < counts.length; i++) {
                 long e = counts[i];
@@ -539,14 +483,13 @@ public class CassandraUtils {
             }
         }
 
-        public String asciiHistogram(long count, int length) {
+        String asciiHistogram(long count, int length) {
             StringBuilder sb = new StringBuilder();
-            long barVal = count;
-            int intWidth = (int) (barVal * 1.0 / max * length);
-            double remainderWidth = (barVal * 1.0 / max * length) - intWidth;
+            int intWidth = (int) (count * 1.0 / max * length);
+            double remainderWidth = (count * 1.0 / max * length) - intWidth;
             sb.append(Strings.repeat("▉", intWidth));
             if (bars.floorKey(remainderWidth) != null) {
-                sb.append("" + bars.get(bars.floorKey(remainderWidth)));
+                sb.append("").append(bars.get(bars.floorKey(remainderWidth)));
             }
             return sb.toString();
         }

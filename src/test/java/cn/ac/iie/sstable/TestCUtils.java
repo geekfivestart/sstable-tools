@@ -1,4 +1,4 @@
-package com.csforge.sstable;
+package cn.ac.iie.sstable;
 
 
 import junit.framework.Assert;
@@ -11,6 +11,8 @@ import org.junit.Test;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 
+import static cn.ac.iie.cassandra.CassandraUtils.tableFromCQL;
+
 public class TestCUtils {
     static {
         Config.setClientMode(true);
@@ -22,7 +24,7 @@ public class TestCUtils {
 
     @Test
     public void testFromCQLWithoutKeyspace() throws Exception {
-        CFMetaData cfm = CassandraUtils.tableFromCQL(new ByteArrayInputStream(
+        CFMetaData cfm = tableFromCQL(new ByteArrayInputStream(
                 ("   CREATE TABLE users (\n" +
                 "        user_name varchar PRIMARY KEY,\n" +
                 "        password varchar,\n" +
@@ -36,7 +38,7 @@ public class TestCUtils {
 
     @Test
     public void testFromCQLWithKeyspace() throws Exception {
-        CFMetaData cfm = CassandraUtils.tableFromCQL(new ByteArrayInputStream(
+        CFMetaData cfm = tableFromCQL(new ByteArrayInputStream(
                 ("   CREATE TABLE blog.users (\n" +
                         "        user_name varchar PRIMARY KEY,\n" +
                         "        password varchar,\n" +
@@ -52,7 +54,7 @@ public class TestCUtils {
     @Test
     public void testFromSSTable() throws Exception {
         File path = Utils.getSSTable("ma", 2);
-        CFMetaData cfm = CassandraUtils.tableFromSSTable(path);
+        CFMetaData cfm = SSTableUtils.tableFromSSTable(path);
         Assert.assertEquals(5, cfm.allColumns().size());
     }
 }
