@@ -14,6 +14,6 @@ public class MigrateTask implements Job {
 
     @Override
     public void execute(JobExecutionContext jobExecutionContext) throws JobExecutionException {
-        MigrateUtils.doMigrate();
+        MigrateUtils.startDoMigrateTask();
     }
 }

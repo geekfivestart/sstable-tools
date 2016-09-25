@@ -68,4 +68,12 @@ public class MigrateDirectories {
         return result;
     }
 
+    public int dirCount(){
+        int count;
+        synchronized (syncObj) {
+            count = migrateDirectories.size();
+        }
+        return count;
+    }
+
 }

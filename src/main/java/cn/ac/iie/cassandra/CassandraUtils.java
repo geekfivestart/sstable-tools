@@ -88,7 +88,7 @@ public class CassandraUtils {
             logger.error("表不存在： {}", tableName);
             throw new NoSuchTableException(String.format("表不存在: %s", tableName));
         }
-        logger.info("从keyspace（{}）元数据中获取了table（{}）的元数据：{}",tableName, tableMetaData.toString());
+        logger.info("从keyspace（{}）元数据中获取了table（{}）的元数据：{}",keyspaceName, tableMetaData.toString());
         cfMetaDataMap.put(ksTableName, tableMetaData);
         return tableMetaData;
     }
@@ -194,13 +194,22 @@ public class CassandraUtils {
         return fileList;
     }
 
+    /**
+     * 通过表名，获取冷化的sstable
+     * 首先从集群中获取表的元数据，
+     * 然后从元数据中获取数据存储路径
+     * 最后获取各个路径下的所有sstable
+     * @param keyspaceName keyspace名称
+     * @param tableName table名称
+     * @param expiredSecond 冷化时间
+     * @return 返回所有已冷化且为迁移的sstable
+     */
     public static List<File> expiredSSTableFromName(String keyspaceName, String tableName, @NotNull Long expiredSecond)
             throws Exception {
         Long maxEntireMicroSecond = (expiredSecond + maxWindowSizeSeconds(keyspaceName, tableName)) *  million;
         Long nowTimestamp = System.currentTimeMillis() * 1000;
 
         CFMetaData metaData = tableFromName(keyspaceName, tableName);
-
         Directories directories = new Directories(metaData, ColumnFamilyStore.getInitialDirectories());
         List<File> fileList = new ArrayList<>();
         // 非数据文件暂时不迁移；软连接文件表示已经迁移过，无需再迁移，因此，
@@ -211,7 +220,7 @@ public class CassandraUtils {
                         return fileType == Directories.FileType.FINAL
                                 && file.getName().endsWith("Data.db")
                                 && !Files.isSymbolicLink(file.toPath())
-                                && nowTimestamp - maxTimestampOfSSTable(file.getCanonicalPath()) >= maxEntireMicroSecond;
+                                && nowTimestamp - maxTimestampOfSSTable(file.getAbsolutePath()) >= maxEntireMicroSecond;
                     } catch (Exception e) {
                         logger.error(e.getMessage(), e);
                         return false;
@@ -222,16 +231,16 @@ public class CassandraUtils {
     }
 
     /**
-     * 获取某个table的压缩最大时间窗口
-     * 前提是该table的压缩策略必须为DateTieredCompactionStrategy
+     * 获取某个table的合并最大时间窗口
+     * 前提是该table的合并策略必须为DateTieredCompactionStrategy
      * @param keyspaceName keyspace名称
      * @param tableName table名称
-     * @return 返回table的最大压缩时间窗口
+     * @return 返回table的最大合并时间窗口
      */
     private static Long maxWindowSizeSeconds(String keyspaceName, String tableName)
             throws Exception {
         // 由于缓存中key的格式为keyspace.table，因此需要将table名称装换成真正的table名
-        // 获取最大压缩时间窗口时优先从缓存中获取，若缓存中不存在则寻找相应的表元数据，
+        // 获取最大合并时间窗口时优先从缓存中获取，若缓存中不存在则寻找相应的表元数据，
         // 然后从表元数据中获取该时间窗口，同时将该值加入缓存中
         String ksTableName = String.format("%s.%s", keyspaceName, tableName);
         if(maxWindowSizeSecondsMap.containsKey(ksTableName)){
@@ -239,7 +248,7 @@ public class CassandraUtils {
         }
         CFMetaData metaData = tableFromKeyspace(keyspaceName, tableName);
         if(DateTieredCompactionStrategy.class.isAssignableFrom(metaData.params.compaction.klass())) {
-            // 如果压缩策略设置为DateTieredCompactionStrategy，则元数据中应包含max_window_size_seconds
+            // 如果合并策略设置为DateTieredCompactionStrategy，则元数据中应包含max_window_size_seconds
             // 若不包含该属性，则有可能是集群出现问题，应首先检查集群健康状态及相关keyspace与table状态
 
             Map<String, String> params = metaData.params.compaction.options();
@@ -252,7 +261,7 @@ public class CassandraUtils {
                 throw new Exception("不存在max_window_size_seconds属性，请确认schema是否正确");
             }
         } else if(TimeWindowCompactionStrategy.class.isAssignableFrom(metaData.params.compaction.klass())){
-            // 如果压缩策略设置为TimeWindowCompactionStrategy，
+            // 如果合并策略设置为TimeWindowCompactionStrategy，
             // 则元数据中应包含compaction_window_size及compaction_window_unit
             Map<String, String> params = metaData.params.compaction.options();
             String size;
@@ -285,7 +294,7 @@ public class CassandraUtils {
             maxWindowSizeSecondsMap.put(ksTableName, secondDigit);
             return secondDigit;
         } else {
-            throw new Exception(String.format("表%s.%s的压缩策略应为DateTieredCompactionStrategy,而不是%s",
+            throw new Exception(String.format("表%s.%s的合并策略应为DateTieredCompactionStrategy、TimeWindowCompactionStrategy,而不是%s",
                     keyspaceName, tableName, InvokeUtils.genericSuperclass(metaData.params.compaction.klass())));
         }
     }
@@ -308,6 +317,14 @@ public class CassandraUtils {
                 ssTablePath, maxTimestamp, SSTableUtils.toDateString(maxTimestamp, TimeUnit.MICROSECONDS, false));
         maxTimestampMap.put(ssTablePath, maxTimestamp);
         return maxTimestamp;
+    }
+
+    /**
+     * 删除ssTable最大时间戳缓存
+     * @param ssTablePath ssTable文件路径
+     */
+    public static void removeMaxTimestamp(String ssTablePath){
+        maxTimestampMap.remove(ssTablePath);
     }
 
     /**

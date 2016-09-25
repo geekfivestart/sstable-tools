@@ -76,10 +76,10 @@ public class MigrateDirectory implements Comparable<MigrateDirectory>{
     @Override
     public int compareTo(MigrateDirectory o) {
         if(o.getDir() == null)
-            return 1;
-        if(this.getDir() == null){
             return -1;
+        if(this.getDir() == null){
+            return 1;
         }
-        return (this.remainSpace() - o.remainSpace()) > 0?1:-1;
+        return (this.remainSpace() - o.remainSpace()) > 0?-1:1;
     }
 }

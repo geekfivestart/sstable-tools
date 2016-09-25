@@ -4,6 +4,7 @@ import cn.ac.iie.drive.Options;
 import cn.ac.iie.drive.commands.base.ClusterTableCmd;
 import cn.ac.iie.migrate.MigrateUtils;
 import com.google.common.collect.Lists;
+import io.airlift.command.Arguments;
 import io.airlift.command.Command;
 import io.airlift.command.Option;
 
@@ -30,9 +31,13 @@ public class MigrateCmd extends ClusterTableCmd {
     )
     private String cronExpression = "";
 
-    @Option(name = {"-p", "--migrate-path"},
+    @Option(name = {"-m", "--maxAttempt"},
+            title = "最大尝试次数", description = "最大迁移尝试次数，默认为10")
+    private Integer maxMigrateAttemptTimes = 10;
+
+    @Arguments(usage = "<目录1> <目录2> ...",
             title = "迁移目录", description = "迁移目标目录列表，可设置多个")
-    private ListParam migratePath;
+    private List<String> migratePath = Lists.newArrayList();
 
     @Override
     protected boolean validate() {
@@ -40,7 +45,7 @@ public class MigrateCmd extends ClusterTableCmd {
             System.out.println("迁移目录为空");
             return false;
         }
-        for (String path : migratePath.values) {
+        for (String path : migratePath) {
             File file = new File(path);
             if(!(file.exists() && file.isDirectory() && file.canWrite())){
                 System.out.println(String.format("文件夹%s 不存在或无写入权限", path));
@@ -49,14 +54,15 @@ public class MigrateCmd extends ClusterTableCmd {
             System.out.println(String.format("迁移目录：%s", path));
         }
 
-        return super.validate() && expiredSecond > 0 && !"".equals(cronExpression) && migratePath.values.size() > 0;
+        return super.validate() && expiredSecond > 0 && !"".equals(cronExpression) && migratePath.size() > 0;
     }
 
     @Override
     protected void execute() {
         Options.init(ksName, tbName, expiredSecond, null);
         Options.instance.setCronExpression(cronExpression);
-        Options.instance.setMigratePaths(migratePath.values);
+        Options.instance.setMigratePaths(migratePath);
+        Options.instance.maxMigrateAttemptTimes = maxMigrateAttemptTimes;
         MigrateUtils.startMigrate();
     }
 }

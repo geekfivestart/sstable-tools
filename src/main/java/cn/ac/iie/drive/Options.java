@@ -18,6 +18,7 @@ public class Options {
     public final String ssTablePath;
     public String cronExpression;
     public final MigrateDirectories migrateDirectories = new MigrateDirectories();
+    public int maxMigrateAttemptTimes = 10;
     public static Options instance;
 
 
