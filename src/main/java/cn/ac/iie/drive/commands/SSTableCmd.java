@@ -1,5 +1,6 @@
 package cn.ac.iie.drive.commands;
 
+import cn.ac.iie.cassandra.CassandraUtils;
 import cn.ac.iie.drive.Options;
 import cn.ac.iie.drive.commands.base.ClusterTableCmd;
 import cn.ac.iie.sstable.SSTableUtils;
@@ -7,6 +8,7 @@ import cn.ac.iie.sstable.TableTransformer;
 import com.google.common.base.Strings;
 import io.airlift.command.Command;
 import io.airlift.command.Option;
+import org.apache.cassandra.tools.NodeProbe;
 
 /**
  * 获取某个表的所有sstable文件命令

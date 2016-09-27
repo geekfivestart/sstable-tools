@@ -2,6 +2,7 @@ package cn.ac.iie.migrate;
 
 import cn.ac.iie.cassandra.CassandraUtils;
 import cn.ac.iie.drive.Options;
+import cn.ac.iie.utils.FileUtils;
 import com.google.common.collect.Lists;
 import org.quartz.*;
 import org.quartz.impl.StdSchedulerFactory;
@@ -50,7 +51,7 @@ public class MigrateUtils {
         int diskCount = Options.instance.migrateDirectories.dirCount();
         try {
             Properties p = new Properties();
-            p.setProperty("org.quartz.threadPool.threadCount", ++diskCount+"");
+            p.setProperty("org.quartz.threadPool.threadCount", diskCount+"");
             p.setProperty("org.quartz.threadPool.class", "org.quartz.simpl.SimpleThreadPool");
             SchedulerFactory factory = new StdSchedulerFactory(p);
             scheduler = factory.getScheduler();
@@ -159,7 +160,13 @@ public class MigrateUtils {
             LOG.error("冷数据迁移异常退出");
 //                System.exit(-1);
         }
-        if(directory == null){
+        // 若未能从列表中取出目标路径或者ssTable被cassandra占用，
+        // 则直接设置迁移失败，等待下一次重新执行迁移任务
+        // 未能取出目标路径说明其它任务正在使用全部路径，暂时无可用目标目录可用，
+        // 等待其它任一任务执行完毕即可
+        // ssTable文件被其它进程占用，则说明cassandra进程极有可能正在对该ssTable进行读或写操作，
+        // 因此需要等待cassandra完成操作后再执行任务
+        if(directory == null || !FileUtils.noOthersUsing(file)){
             migrated = false;
         } else {
             String tableDir = file.getParentFile().getName();
@@ -217,24 +224,33 @@ public class MigrateUtils {
 
 
         if(migrated) {
+            // 仅当文件不被占用且目标文件与原文件相同时才进行下一步操作
+            // 由于ssTable 的性质，若cassandra对ssTable进行的操作只能是追加内容或者删除文件，
+            // 因此，若原文件与目标文件大小不一致则说明原文件发生了变化；
+            // 反之，则说明原文件未发生任何变化
+            if(FileUtils.noOthersUsing(sourceFile)
+                    && targetFile.length() > 0
+                    && FileUtils.isSameLength(sourceFile, targetFile)) {
+                // 重命名原sstable文件
+                try {
+                    migrated = sourceFile.renameTo(tmpFile);
+                } catch (Exception e) {
+                    LOG.error(e.getMessage(), e);
+                    migrated = false;
+                }
 
-            // 重命名原sstable文件
-            try {
-                migrated = sourceFile.renameTo(tmpFile);
-            } catch (Exception e) {
-                LOG.error(e.getMessage(), e);
+                if (!migrated) {
+                    if (!deleteFile(targetFile)) {
+                        LOG.warn("迁移失败，但目标文件未能删除：{}", targetFile.getAbsolutePath());
+                    }
+                    return false;
+                }
+
+
+                migrated = createSymbolicLink(linkPath, targetPath);
+            } else{
                 migrated = false;
             }
-
-            if(!migrated){
-                if(!deleteFile(targetFile)){
-                    LOG.warn("迁移失败，但目标文件未能删除：{}", targetFile.getAbsolutePath());
-                }
-                return false;
-            }
-
-
-            migrated = createSymbolicLink(linkPath, targetPath);
             if (migrated) {
                 if(!deleteFile(tmpFile)){
                     LOG.warn("迁移成功，但临时文件未能删除：{}", tmpFile.getAbsolutePath());

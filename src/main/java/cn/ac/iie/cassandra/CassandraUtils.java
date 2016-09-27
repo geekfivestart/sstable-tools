@@ -8,24 +8,31 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.io.CharStreams;
 import com.jeffjirsa.cassandra.db.compaction.TimeWindowCompactionStrategy;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.CFStatement;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ColumnFamilyStoreMBean;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.schema.*;
+import org.apache.cassandra.tools.NodeProbe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.validation.constraints.NotNull;
 import java.io.*;
 import java.nio.file.Files;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -64,6 +71,23 @@ public class CassandraUtils {
                 throw new NoSuchKeyspaceException(String.format("不存在keyspace: %s", keyspaceName));
             }
             logger.info("从集群中获取了keyspace（{}）的元数据：{}", keyspaceName, metadata.toString());
+            logger.info("共启动{}个后台任务，其中{}个正在执行中，{}个已完成",
+                    ScheduledExecutors.optionalTasks.getTaskCount(),
+                    ScheduledExecutors.optionalTasks.getActiveCount(),
+                    ScheduledExecutors.optionalTasks.getCompletedTaskCount());
+            ScheduledExecutors.optionalTasks.getQueue().forEach(runnable -> {
+                if(runnable instanceof RunnableScheduledFuture){
+                    RunnableScheduledFuture task = (RunnableScheduledFuture) runnable;
+                    if(task.cancel(true)){
+                        logger.info("已停止一个{}类型的任务", task.getClass().getName());
+                    }
+                }
+            });
+            ScheduledExecutors.optionalTasks.shutdown();
+            logger.info("共启动{}个后台任务，其中{}个正在执行中，{}个已完成",
+                    ScheduledExecutors.optionalTasks.getTaskCount(),
+                    ScheduledExecutors.optionalTasks.getActiveCount(),
+                    ScheduledExecutors.optionalTasks.getCompletedTaskCount());
             keyspaceMetadataMap.put(keyspaceName, metadata);
             return metadata;
         }
@@ -88,7 +112,8 @@ public class CassandraUtils {
             logger.error("表不存在： {}", tableName);
             throw new NoSuchTableException(String.format("表不存在: %s", tableName));
         }
-        logger.info("从keyspace（{}）元数据中获取了table（{}）的元数据：{}",keyspaceName, tableMetaData.toString());
+        logger.info("从keyspace（{}）元数据中获取了table（{}）的元数据：{}",
+                keyspaceName, tableName, tableMetaData.toString());
         cfMetaDataMap.put(ksTableName, tableMetaData);
         return tableMetaData;
     }
@@ -181,6 +206,7 @@ public class CassandraUtils {
     public static List<File> ssTableFromName(String keyspaceName, String tableName, boolean includeSymbolicLink)
             throws NoSuchKeyspaceException, NoSuchTableException {
         CFMetaData metaData = tableFromName(keyspaceName, tableName);
+
 
         Directories directories = new Directories(metaData, ColumnFamilyStore.getInitialDirectories());
         List<File> fileList = new ArrayList<>();

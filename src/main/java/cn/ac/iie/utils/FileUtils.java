@@ -4,7 +4,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -31,6 +35,49 @@ public class FileUtils {
     public static boolean createDirIfNotExists(File dir) {
         boolean exists = dir.exists();
         return exists && dir.isDirectory() || !exists && dir.mkdirs();
+    }
+
+    /**
+     * 判断文件是否被其它进程占用<br/>
+     * 判断原理为：<br/>
+     * 对文件上锁，如果能够成功上锁，则说明文件不被其它进程占用；<br/>
+     * 否则，说明文件被其它进程占用。
+     * @param f 文件对象
+     * @return 如果文件不存在或文件不被其它进程占用，返回true；<br/>
+     * 否则，返回false。
+     */
+    public static boolean noOthersUsing(File f){
+        boolean noUsing = false;
+        FileLock lock = null;
+        try {
+            RandomAccessFile raf = new RandomAccessFile(f, "rw");
+            FileChannel channel = raf.getChannel();
+            lock = channel.tryLock();
+            noUsing = lock.isValid();
+        } catch (FileNotFoundException e) {
+            noUsing = true;
+        } catch (IOException e) {
+            LOG.error(e.getMessage(), e);
+        } finally {
+            if (lock != null) {
+                try {
+                    lock.close();
+                } catch (IOException e) {
+                    LOG.error(e.getMessage(), e);
+                }
+            }
+        }
+        return noUsing;
+    }
+
+    /**
+     * 判断两个文件大小是否相同
+     * @param f 文件1
+     * @param l 文件2
+     * @return 返回两个文件大小是否相同
+     */
+    public static boolean isSameLength(File f, File l){
+        return f.length() == l.length();
     }
 
     /**
