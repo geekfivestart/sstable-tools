@@ -49,10 +49,13 @@ public class CassandraUtils {
     private static final Map<String, KeyspaceMetadata> keyspaceMetadataMap = Maps.newConcurrentMap();
     private static final Map<String, CFMetaData> cfMetaDataMap = Maps.newConcurrentMap();
     private static final Map<String, Long> maxWindowSizeSecondsMap = Maps.newConcurrentMap();
-    private static final Map<String, Long> maxTimestampMap = Maps.newConcurrentMap();
     private static final Long million = 1000000L;
     private static boolean loaded = false;
 
+    /**
+     * 关闭不必要的后台任务
+     * 该操作，忽略所有异常
+     */
     private static void shutdownBackgroundTasks() {
         try {
             if(!Config.isClientMode()) {
@@ -130,6 +133,7 @@ public class CassandraUtils {
      */
     private static CFMetaData tableFromKeyspace(String keyspaceName, String tableName)
             throws NoSuchKeyspaceException, NoSuchTableException {
+        // 由于缓存中key的格式为keyspace.table，因此需要将table名称装换成真正的table名
         String ksTableName = String.format("%s.%s", keyspaceName, tableName);
         if(cfMetaDataMap.containsKey(ksTableName)){
             return cfMetaDataMap.get(ksTableName);
@@ -266,6 +270,12 @@ public class CassandraUtils {
         CFMetaData metaData = tableFromName(keyspaceName, tableName);
         Directories directories = new Directories(metaData, ColumnFamilyStore.getInitialDirectories());
         List<File> fileList = new ArrayList<>();
+        // 尝试过使用jmx直接从cassandra进程中获取所有ssTable文件，
+        // 虽然该方法可行且更为方便，
+        // 但鉴于目前原生cassandra并不提供该接口，
+        // 若想使用该方法须自行修改cassandra代码添加该接口，
+        // 这样难以保证安全性，因此暂不推荐该方法
+        // 但目前的方法还无法判断ssTable是否在线
         // 非数据文件暂时不迁移；软连接文件表示已经迁移过，无需再迁移，因此，
         // 过滤非数据文件及软连接文件
         directories.getCFDirectories().forEach(dir -> LifecycleTransaction.getFiles(dir.toPath(),
@@ -359,26 +369,14 @@ public class CassandraUtils {
      * @return 返回最大时间戳
      */
     private static Long maxTimestampOfSSTable(String ssTablePath) throws Exception {
-        // 优先从缓存中获取最大时间戳数据，若缓存中不存在则从SSTable元数据中获取
-        if (maxTimestampMap.containsKey(ssTablePath)) {
-            return maxTimestampMap.get(ssTablePath);
-        }
+        // 从SSTable元数据中获取
         Long maxTimestamp = SSTableUtils.maxTimestamp(ssTablePath);
         if (maxTimestamp <= 0) {
             throw new Exception(String.format("文件%s的最大时间戳不正确", ssTablePath));
         }
         logger.info("获取STable文件： {} 的最大时间戳：{}，格式化时间为：{}",
                 ssTablePath, maxTimestamp, SSTableUtils.toDateString(maxTimestamp, TimeUnit.MICROSECONDS, false));
-        maxTimestampMap.put(ssTablePath, maxTimestamp);
         return maxTimestamp;
-    }
-
-    /**
-     * 删除ssTable最大时间戳缓存
-     * @param ssTablePath ssTable文件路径
-     */
-    public static void removeMaxTimestamp(String ssTablePath){
-        maxTimestampMap.remove(ssTablePath);
     }
 
     /**

@@ -221,8 +221,6 @@ public class MigrateUtils {
             } else {
                 startDoMigrateTask(file, attempt + 1, 300);
             }
-        } else{
-            CassandraUtils.removeMaxTimestamp(file.getAbsolutePath());
         }
         return migrated;
     }
@@ -256,7 +254,7 @@ public class MigrateUtils {
             if(FileUtils.noOthersUsing(sourceFile)
                     && targetFile.length() > 0
                     && FileUtils.isSameLength(sourceFile, targetFile)) {
-                // 重命名原sstable文件
+                // 重命名原ssTable文件
                 try {
                     migrated = sourceFile.renameTo(tmpFile);
                 } catch (Exception e) {
