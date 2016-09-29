@@ -1,330 +1,233 @@
 # SSTable Tools
 
-[![Build Status](https://travis-ci.org/tolbertam/sstable-tools.svg?branch=master)](https://travis-ci.org/tolbertam/sstable-tools)[ ![Download](https://api.bintray.com/packages/tolbertam/sstable-tools/sstable-tools.jar/images/download.svg) ](https://bintray.com/tolbertam/sstable-tools/sstable-tools.jar/_latestVersion)
+[ ![Download] ](https://github.com/xiangt920/sstable-tools/releases/download/v3.7.0-migrate/cassandra-patch.tar.gz)
 
-A toolkit for parsing, creating and doing other fun stuff with Cassandra 3.x SSTables. This project is under development and not yet stable. Mainly a proof of concept playground for wish items.
+一个用于解析、查看 Cassandra 3.x SSTables文件的工具。同时以第三方工具补丁的形式提供cassandra冷数据迁移的功能。目前该项目还在开发测试过程中，冷数据迁移功能还在大规模数据测试中。
 
-Pre compiled binary available from bintray:
+预编译的cassandra冷数据迁移补丁:
 
-* [sstable-tools-3.0.7-alpha6.jar](https://bintray.com/tolbertam/sstable-tools/download_file?file_path=sstable-tools-3.7.0-alpha6.jar) -  Supports 3.0 to 3.7 (ma and mb sstable formats)
+* [cassandra-patch.tar.gz](https://github.com/xiangt920/sstable-tools/releases/download/v3.7.0-migrate/cassandra-patch.tar.gz) -  当前支持Cassandra 3.7
 
-**Note:** This tool formerly included a `tojson` command which dumped SSTable contents to JSON.  This functionality has
-since been merged into Cassandra starting with versions 3.0.4 and 3.4 as the `sstabledump` command.
+示例:
 
-Example usage:
+    java -jar sstable-tools.jar describe -f ma-2-big-Data.db
+    java -jar sstable-tools.jar timestamp -f ma-2-big-Data.db
+    sstable-tools sstable -k keyspace -t table
+    sstable-tools migrate -k keyspace -t table -c "0 0 2 * * ?" -e 1000 -m 10 /data00 /data01
 
-    java -jar sstable-tools.jar cqlsh
-    java -jar sstable-tools.jar hints 1458779867606-1.hints
-    java -jar sstable-tools.jar describe ma-2-big-Data.db
+**注意:** describe 与 timestamp无需进行环境配置即可运行，sstable 与 migrate命令需要以补丁的形式放入cassandra安装目录下执行，或者自己设置相关环境变量（详见stable-tools脚本文件）也可。
 
-Example shell usage:
+**特性:**
 
-    java -jar sstable-tools.jar cqlsh
+* [describe](#describe) - 查看sstable中的数据与元数据；
+* [timestamp](#timestamp) - 查看sstable中的数据的时间戳范围；
+* [sstable](#sstable) - 查看指定的表在本节点的所有sstable文件；
+* [migrate](#migrate) - 执行冷数据迁移。
 
-    ## Select one or more sstables (space delimited, or choose directory to include all)
-    cqlsh> use ma-2-big-Data.db;
-    Using: /home/user/sstable-tools/ma-2-big-Data.db
+## 构建
 
-    ## Use predefined schema file.
-    ## Can view with 'schema'.
-    ## This is optional but without it the partition
-    ## key and clustering index names are unknown.
-    cqlsh> schema schema.cql
-    Successfully imported schema from '/home/user/sstable-tools/schema.cql'.
-
-    ## Alternatively, use 'CREATE TABLE' statement to enter a schema.
-    cqlsh> CREATE TABLE users (
-    ...        user_name varchar PRIMARY KEY,
-    ...        password varchar,
-    ...        gender varchar,
-    ...        state varchar,
-    ...        birth_year bigint
-    ...    );
-
-    ## Discover the data in sstable(s) using CQL queries
-    cqlsh> SELECT * FROM sstable WHERE age > 1 LIMIT 1
-
-     ┌────────────┬─────────────┬─────────┬───────────┬────────┐
-     │user_name   │birth_year   │gender   │password   │state   │
-     ╞════════════╪═════════════╪═════════╪═══════════╪════════╡
-     │frodo       │1985         │male     │pass@      │CA      │
-     └────────────┴─────────────┴─────────┴───────────┴────────┘
-
-    ## Display raw sstable data (useful to see tombstones and expired ttls)
-    ## with optional where clause
-    cqlsh> DUMP WHERE age > 1 LIMIT 1
-
-    [frodo] Row[info=[ts=1455937221199050] ]:  | [birth_year=1985 ts=1455937221199050], [gender=male ts=1455937221199050], [password=pass@ ts=1455937221199050], [state=CA ts=1455937221199050]
-
-    ## Describe the sstable data and metadata
-    cqlsh> describe sstables;
-
-    /Users/clohfink/git/sstable-tools/./src/test/resources/ma-2-big-Data.db
-    =======================================================================
-    Partitions: 1
-    Rows: 1
-    Tombstones: 0
-    Cells: 4
-    Widest Partitions:
-       [frodo] 1
-    Largest Partitions:
-       [frodo] 104 (104 B)
-    Tombstone Leaders:
-    Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
-    Bloom Filter FP chance: 0.010000
-    Size: 50 (50 B)
-    Compressor: org.apache.cassandra.io.compress.LZ4Compressor
-      Compression ratio: -1.0
-    Minimum timestamp: 1455937221199050 (02/19/2016 21:00:21)
-    Maximum timestamp: 1455937221199050 (02/19/2016 21:00:21)
-    SSTable min local deletion time: 2147483647 (01/18/2038 21:14:07)
-    SSTable max local deletion time: 2147483647 (01/18/2038 21:14:07)
-    TTL min: 0 (0 milliseconds)
-    ...[snip]...
-
-    ## Paging is enabled by default and can be manipulated by using 'PAGING'
-    cqlsh> PAGING 20;
-    Now Query paging is enabled
-    Page size: 20
-    cqlsh> PAGING OFF;
-    Disabled Query paging.
-    cqlsh> PAGING ON;
-    Now Query paging is enabled
-    Page size: 20
-
-    ## Used sstables, schema, and paging settings and persisted for future use.
-    ## Use the 'PERSIST' command to view preferences and to enable/disable
-    ## persistence.
-    cqlsh> PERSIST;
-    Preferences are currently enabled:
-    pagingEnabled=true
-    pagingSize=20
-    preferencesEnabled=true
-    schema=""
-    sstables=[
-        "/home/user/sstable-tools/ma--big-Data.db"
-    ]
-    cqlsh> PERSIST OFF;
-    Disabled Preferences.
-
-**Note:** No environment configuration is necessary for this tool to work if all components of the sstable are available but the cql create statement allows for more details.
-
-**Features:**
-
-* [cqlsh](#cqlsh) - Drop into an interactive shell to make queries against SSTables.
-* [describe](#describe) - Describe SSTable data and metadata.
-* [hints](#hints) - Dump hints from a hint file
-
-## Building
-
-This project uses [Apache Maven](https://maven.apache.org/) to build a
-self-contained executable jar.  To build the jar simply execute:
+本项目使用 [Apache Maven](https://maven.apache.org/) 来构建一个
+可执行jar包。  构建该jar包可执行以下命令:
 
 ```shell
 mvn package
 ```
 
-The executable jar will be present in the target directory.
-
-## cqlsh
-cql shell similiar and modeled after the C* cqlsh tool. Enables issuing cql queries against raw sstables and
-provides additional diagnostic tools over them. Provides history (reverse searchable with ctrl-r) and autocomplete for ease of use.
-
-```text
-Commands:
-
-HELP               - prints this message
-EXIT               - leaves the shell
-CREATE TABLE ...   - A CREATE TABLE cql statement to use as metadata when reading sstables (HIGHLY RECOMMENDED!)
-DESCRIBE SCHEMA    - Show currently used schema (or serialized cfmetadata if generated)
-DESCRIBE SSTABLES  - Provide details and statistics on current sstable(s)
-PAGING [(ON|OFF)]  - Enables, disables, or shows current status of query paging.
-PAGING <SIZE>      - Enables paging and sets paging size.
-PERSIST [(ON|OFF)] - Enables, disables, or shows current status of persistence of settings state.
-SCHEMA [<FILE>]    - Imports a cql file as the active table schema or shows active user-defined schema.
-USE                - update the sstable[s] used by default with select, dump, describe commands
-    USE /var/lib/cassandra/data/system/peers/ma-1-big-Data.db
-    or with multiple sstables separated with spaces. This can also be a directory which will add all sstables in it.
-    USE ma-1-big-Data.db ma-2-big-Data.db "/home/path with space/db/data/sstables"
-
-SELECT             - run a cql query against the current sstable (unless other specified)
-    SELECT * FROM sstables WHERE key > 1 LIMIT 10
-    the keyword sstables will use the current sstable set with the USE command or set when running cqlsh. You can also
-    specify an sstable here
-    SELECT avg(someColumn) FROM /var/lib/cassandra/data/system/peers/ma-1-big-Data.db WHERE key > 1
-
-DUMP               - dump the raw unfiltered partitions/rows. Useful for debuging TTLed/tombstoned data.
-    DUMP;
-    Can also specify a where clause for filtering the results.
-    DUMP WHERE partitionKey = 'OpsCenter';
-```
-
-![cql example](http://imgur.com/YXyjffj.gif)
-(note: slow analyzing artifact of ttygif, describing sstable in this scenario is sub second.)
+可执行jar包将在target目录下生成。
 
 ## describe
 
-Provides information about an sstable's data and its metadata. Can be used as argument or via cqlsh.
+打印与指定sstable相关的数据与元数据信息。 
 
-Example Output:
+示例输出:
 
 ```
 /Users/clohfink/git/sstable-tools/ma-119-big-Data.db
 ====================================================
-Partitions: 22515                                                               
-Rows: 13579337
+Partitions: 32162                                                               
+Rows: 32162
 Tombstones: 0
-Cells: 13579337
+Cells: 353782
 Widest Partitions:
-   [12345] 999999
-   [99049] 62664
-   [99007] 60437
-   [99017] 59728
-   [99010] 59555
+   [7339364] 1
+   [7153250] 1
+   [7216142] 1
+   [7043886] 1
+   [7687007] 1
 Largest Partitions:
-   [12345] 189888705 (189.9 MB)
-   [99049] 2965017 (3.0 MB)
-   [99007] 2860391 (2.9 MB)
-   [99017] 2826094 (2.8 MB)
-   [99010] 2818038 (2.8 MB)
+   [7445112] 3418 (3.4 kB)
+   [7015610] 3278 (3.3 kB)
+   [7290631] 3109 (3.1 kB)
+   [7043285] 2808 (2.8 kB)
+   [7728519] 2788 (2.8 kB)
 Tombstone Leaders:
 Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 Bloom Filter FP chance: 0.010000
-Size: 540932262 (540.9 MB) 
+Size: 30920990 (30.9 MB) 
 Compressor: org.apache.cassandra.io.compress.LZ4Compressor
-  Compression ratio: 0.3068105022732033
-Minimum timestamp: 1456554952195298 (02/27/2016 00:35:52)
-Maximum timestamp: 1456594562846756 (02/27/2016 11:36:02)
-SSTable min local deletion time: 2147483647 (01/18/2038 21:14:07)
-SSTable max local deletion time: 2147483647 (01/18/2038 21:14:07)
+  Compression ratio: 0.6600443582175085
+Minimum timestamp: 1474892678232006 (2016-09-26 20:24:38)
+Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
+SSTable min local deletion time: 2147483647 (2038-01-19 11:14:07)
+SSTable max local deletion time: 2147483647 (2038-01-19 11:14:07)
 TTL min: 0 (0 milliseconds)
 TTL max: 0 (0 milliseconds)
-minClustringValues: [1]
-maxClustringValues: [999999]
+minClustringValues: []
+maxClustringValues: []
 Estimated droppable tombstones: 0.0
 SSTable Level: 0
-Repaired at: 0 (12/31/1969 18:00:00)
-  Lower bound: ReplayPosition(segmentId=-1, position=0)
-  Upper bound: ReplayPosition(segmentId=1456414025108, position=16709244)
-totalColumnsSet: 13579337
-totalRows: 13579337
+Repaired at: 0 (1970-01-01 08:00:00)
+  Lower bound: ReplayPosition(segmentId=1474890699224, position=4007)
+  Upper bound: ReplayPosition(segmentId=1474890699229, position=29647053)
+totalColumnsSet: 353782
+totalRows: 32162
 Estimated tombstone drop times:
-  Value                            | Count      %   Histogram 
-  2147483647 (01/18/2038 21:14:07) | 27158674 (100) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
+  Value                            | Count    %   Histogram 
+  2147483647 (2038-01-19 11:14:07) | 385944 (100) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
 Estimated partition size:
-  Value     | Count   %   Histogram 
-  258       |     6 (  0)  
-  310       |    20 (  0) ▏ 
-  372       |    50 (  0) ▍ 
-  446       |    45 (  0) ▍ 
-  535       |    66 (  0) ▍ 
-  642       |    62 (  0) ▍ 
-  770       |   120 (  0) ▉ 
-  924       |   116 (  0) ▉ 
-  1109      |   144 (  0) ▉▏ 
-  1331      |   175 (  0) ▉▍ 
-  1597      |   210 (  0) ▉▊ 
-  1916      |   248 (  1) ▉▉ 
-  2299      |   324 (  1) ▉▉▋ 
-  2759      |   356 (  1) ▉▉▉ 
-  3311      |   460 (  2) ▉▉▉▉ 
-  3973      |   534 (  2) ▉▉▉▉▍ 
-  4768      |   569 (  2) ▉▉▉▉▊ 
-  5722      |   667 (  2) ▉▉▉▉▉▋ 
-  6866      |   786 (  3) ▉▉▉▉▉▉▋ 
-  8239      |  1002 (  4) ▉▉▉▉▉▉▉▉▍ 
-  9887      |  1266 (  5) ▉▉▉▉▉▉▉▉▉▉▋ 
-  11864     |  1446 (  6) ▉▉▉▉▉▉▉▉▉▉▉▉▏ 
-  14237     |  1779 (  7) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
-  17084     |  2081 (  9) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▍ 
-  20501     |  2598 ( 11) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
-  24601     |  3089 ( 13) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
-  29521     |  3555 ( 15) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
-  35425     |   681 (  3) ▉▉▉▉▉▋ 
-  186563160 |     1 (  0)  
+  Value | Count   %   Histogram 
+  179   |     1 (  0)  
+  215   |     6 (  0)  
+  258   |    66 (  0) ▎ 
+  310   |   260 (  0) ▉▎ 
+  372   |   713 (  2) ▉▉▉▋ 
+  446   |  1562 (  4) ▉▉▉▉▉▉▉▉ 
+  535   |  2246 (  6) ▉▉▉▉▉▉▉▉▉▉▉▍ 
+  642   |  2902 (  9) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▊ 
+  770   |  3470 ( 10) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▊ 
+  924   |  4100 ( 12) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
+  1109  |  4929 ( 15) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▏ 
+  1331  |  5861 ( 18) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
+  1597  |  4971 ( 15) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▍ 
+  1916  |  1021 (  3) ▉▉▉▉▉▏ 
+  2299  |    44 (  0) ▏ 
+  2759  |     7 (  0)  
+  3311  |     3 (  0)  
 Estimated column count:
-  Value   | Count   %   Histogram 
-  10      |    41 (  0) ▎ 
-  12      |    39 (  0) ▎ 
-  14      |    32 (  0) ▎ 
-  17      |    63 (  0) ▍ 
-  20      |    64 (  0) ▍ 
-  24      |   102 (  0) ▉ 
-  29      |   120 (  0) ▉ 
-  35      |   123 (  0) ▉ 
-  42      |   165 (  0) ▉▍ 
-  50      |   189 (  0) ▉▋ 
-  60      |   220 (  0) ▉▉ 
-  72      |   313 (  1) ▉▉▋ 
-  86      |   326 (  1) ▉▉▊ 
-  103     |   429 (  1) ▉▉▉▋ 
-  124     |   493 (  2) ▉▉▉▉▎ 
-  149     |   566 (  2) ▉▉▉▉▉ 
-  179     |   643 (  2) ▉▉▉▉▉▍ 
-  215     |   765 (  3) ▉▉▉▉▉▉▋ 
-  258     |   949 (  4) ▉▉▉▉▉▉▉▉▏ 
-  310     |  1197 (  5) ▉▉▉▉▉▉▉▉▉▉▍ 
-  372     |  1382 (  6) ▉▉▉▉▉▉▉▉▉▉▉▉ 
-  446     |  1722 (  7) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
-  535     |  1971 (  8) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
-  642     |  2469 ( 10) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▍ 
-  770     |  2908 ( 12) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▎ 
-  924     |  3455 ( 15) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
-  1109    |  1708 (  7) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▊ 
-  1131752 |     1 (  0)  
-Estimated cardinality: 22873
+  Value | Count   %   Histogram 
+  12    | 32162 (100) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉ 
+Estimated cardinality: 32002
 EncodingStats minTTL: 0 (0 milliseconds)
-EncodingStats minLocalDeletionTime: 1442880000 (01/17/1970 10:48:00)
-EncodingStats minTimestamp: 1456554952195298 (02/27/2016 00:35:52)
-KeyType: org.apache.cassandra.db.marshal.UTF8Type
-ClusteringTypes: [org.apache.cassandra.db.marshal.UTF8Type]
+EncodingStats minLocalDeletionTime: 1442880000 (1970-01-18 00:48:00)
+EncodingStats minTimestamp: 1474892678228003 (2016-09-26 20:24:38)
+KeyType: org.apache.cassandra.db.marshal.LongType
+ClusteringTypes: []
 StaticColumns: {}
-RegularColumns: {val:org.apache.cassandra.db.marshal.UTF8Type}
+RegularColumns: {
+    f6:org.apache.cassandra.db.marshal.UTF8Type, 
+    f7:org.apache.cassandra.db.marshal.UTF8Type, 
+    f8:org.apache.cassandra.db.marshal.UTF8Type, 
+    f9:org.apache.cassandra.db.marshal.UTF8Type, 
+    f10:org.apache.cassandra.db.marshal.UTF8Type, 
+    f11:org.apache.cassandra.db.marshal.UTF8Type, 
+    f1:org.apache.cassandra.db.marshal.UTF8Type, 
+    f2:org.apache.cassandra.db.marshal.UTF8Type, 
+    f3:org.apache.cassandra.db.marshal.UTF8Type, 
+    f4:org.apache.cassandra.db.marshal.UTF8Type, 
+    f5:org.apache.cassandra.db.marshal.UTF8Type
+}
 ```
 
-### Usage
+### 用法
 
 ```
-java -jar sstable-tools.jar describe /path/to/file.db
+java -jar sstable-tools.jar describe -f /path/to/file.db
 ```
 
-## hints
+## timestamp
 
-Deserialize the mutations in a hints file and print them to standard out. To have the information necessary do deserialize
-the mutations this tool requires the schema of the file. This is currently handled by connecting to the cluster and querying
-the metadata. You can specify the host and (cql) port via the `-h` and `-p` options.
+输出指定sstable中包含数据的时间戳范围
 
-Example Output:
+示例输出
 
 ```
-java -jar sstable-tools.jar hints 1458786695234-1.hints
-Loading schema from 127.0.0.1:9042
-/Users/clohfink/1458786695234-1.hints
-=====================================
-[test.t1] key=1 columns=[[] | [val]]
-    Row: EMPTY | val=1
-[[val=1 ts=1458786688691698]]
-[test.wide] key=myPartitionKey columns=[[] | [val]]
-    Row: key2=myClusteringKey | val=myValue
-[[val=myValue ts=1458790233298650]]
-[test.wide] key=myPartitionKey columns=[[] | [val]]
-    Row: key2=myClusteringKey2 | val=myValue2
-[[val=myValue2 ts=1458790238249336]]
-
+/data06/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-60-big-Data.db
+=====================================================================================
+Minimum timestamp: 1474892678232006 (2016-09-26 20:24:38)
+Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
 ```
 
-### Usage
+### 用法
 
 ```
-java -jar sstable-tools.jar hints
+java -jar sstable-tools.jar timestamp -f /path/to/file.db
+```
 
-usage: hints [-h <arg>] [-p <arg>] [-s] hintfile [hintfile ...]
+## sstable
 
-Hint Dump for Apache Cassandra 3.x
-Options:
-  -h <arg> Host to extract schema frome.
-  -p <arg> CQL native port.
-  -s       Only output mutations.
-  hintfile at least one file containing hints
+输出指定表在本节点的所有sstable文件路径信息
+
+示例输出
 
 ```
+是否包含软连接：true
+ SSTables for keyspace: test, table: resume
+===========================================
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-1-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-13-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-19-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-37-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-43-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-49-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-55-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-7-big-Data.db isSymbolicLink:true
+--finished--
+```
+
+### 用法
+
+```
+sstable-tools sstable -i -k test -t resume
+```
+
+## migrate
+
+冷数据（与热数据相对应，即基本不再访问或极少访问的数据）迁移工具。
+
+### 目的
+
+开发该工具的主要目的是在保证cassandra写入速度的前提下尽量增大节点数据容量并降低硬件成本。
+
+### 工作方式
+
+指定数据冷化时间，当数据冷化后，将数据从ssd磁盘迁移至hdd磁盘，即从高速磁盘迁移至低速磁盘。
+
+
+### 用法
+
+```
+名称
+        sstable-tools migrate - 冷数据迁移
+
+简介
+        sstable-tools migrate [(-c <定时表达式> | --cron_expression <定时表达式>)]
+                [(-e <冷化时间> | --expired_second <冷化时间>)] [(-k <ks名> | --keyspace <ks名>)]
+                [(-m <最大尝试次数> | --maxAttempt <最大尝试次数>)] [(-t <表名> | --table <表名>)] [--]
+                <目录1> <目录2> ...
+
+选项
+        -c <定时表达式>, --cron_expression <定时表达式>
+            quartz定时表达式
+
+        -e <冷化时间>, --expired_second <冷化时间>
+            以“秒”为单位的数据过期时间，该时间过后的数据为冷数据
+
+        -k <ks名>, --keyspace <ks名>
+            keyspace名称
+
+        -m <最大尝试次数>, --maxAttempt <最大尝试次数>
+            最大迁移尝试次数，默认为10
+
+        -t <表名>, --table <表名>
+            table名称
+
+        --
+            该选项用户分隔选项列表
+
+        <目录1> <目录2> ...
+            迁移目标目录列表，可设置多个
+```
+
+### quartz定时表达式
+
+该工具使用quartz管理定时任务，因此使用[cron定时表达式](http://www.quartz-scheduler.org/documentation/quartz-2.2.x/tutorials/tutorial-lesson-06.html)来启动定时任务
