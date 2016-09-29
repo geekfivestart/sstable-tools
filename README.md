@@ -1,7 +1,5 @@
 # SSTable Tools
 
-[ ![Download] ](https://github.com/xiangt920/sstable-tools/releases/download/v3.7.0-migrate/cassandra-patch.tar.gz)
-
 一个用于解析、查看 Cassandra 3.x SSTables文件的工具。同时以第三方工具补丁的形式提供cassandra冷数据迁移的功能。目前该项目还在开发测试过程中，冷数据迁移功能还在大规模数据测试中。
 
 预编译的cassandra冷数据迁移补丁:
@@ -15,7 +13,7 @@
     sstable-tools sstable -k keyspace -t table
     sstable-tools migrate -k keyspace -t table -c "0 0 2 * * ?" -e 1000 -m 10 /data00 /data01
 
-**注意:** describe 与 timestamp无需进行环境配置即可运行，sstable 与 migrate命令需要以补丁的形式放入cassandra安装目录下执行，或者自己设置相关环境变量（详见stable-tools脚本文件）也可。
+**注意:** describe 与 timestamp无需进行环境配置即可运行，sstable 与 migrate命令需要以补丁的形式放入cassandra安装目录下执行，或者自己设置相关环境变量（详见[stable-tools脚本文件](https://github.com/xiangt920/sstable-tools/tree/master/bin/sstable-tools)）也可。
 
 **特性:**
 
