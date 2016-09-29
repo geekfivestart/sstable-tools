@@ -1,10 +1,13 @@
 package cn.ac.iie.migrate;
 
 import org.quartz.Job;
+import org.quartz.JobDetail;
 import org.quartz.JobExecutionContext;
 import org.quartz.JobExecutionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Date;
 
 /**
  * 冷数据迁移任务执行类
@@ -17,7 +20,11 @@ public class MigrateTask implements Job {
 
     @Override
     public void execute(JobExecutionContext jobExecutionContext) throws JobExecutionException {
-        LOG.info("开始执行任务{}", jobExecutionContext.getJobDetail().getKey().getName());
+        JobDetail job = jobExecutionContext.getJobDetail();
+        String jobName = job.getKey().getName();
+        LOG.info("开始执行任务<{}>", jobName);
         MigrateUtils.startDoMigrateTask();
+        Date nextTime = jobExecutionContext.getNextFireTime();
+        LOG.info("任务<{}>执行完毕，下一次执行时间为：{}", jobName, MigrateUtils.DATE_FORMAT.format(nextTime));
     }
 }

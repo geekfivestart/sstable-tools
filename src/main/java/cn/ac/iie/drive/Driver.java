@@ -30,7 +30,7 @@ public class Driver {
                 .withCommands(commands);
 
         Cli<Runnable> parser = builder.build();
-        int status = 0;
+        int status;
         try
         {
             Runnable parse = parser.parse(args);
@@ -46,13 +46,14 @@ public class Driver {
         {
             badUse(e);
             status = 1;
+            System.exit(status);
         } catch (Throwable throwable)
         {
             err(Throwables.getRootCause(throwable));
             status = 2;
+            System.exit(status);
         }
 
-        System.exit(status);
     }
 
     private static void badUse(Exception e)

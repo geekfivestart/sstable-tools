@@ -39,8 +39,8 @@ public class DoMigrateTask implements Job {
 
         File ssTable = (File) context.getJobDetail().getJobDataMap().get("sstable");
         int attempt = (Integer) context.getJobDetail().getJobDataMap().get("attempt");
-        LOG.info("开始第{}次尝试对{}执行迁移任务：{}", attempt+1,ssTable.getName(), jobName);
+        LOG.info("开始第{}次尝试对{}执行迁移任务<{}>", attempt+1,ssTable.getName(), jobName);
         boolean success = MigrateUtils.doMigrate(ssTable, attempt);
-        LOG.info("任务{}，第{}次执行结果：{}", jobName, attempt+1, success?"成功":"失败");
+        LOG.info("任务<{}>，第{}次执行结果：{}", jobName, attempt+1, success?"成功":"失败");
     }
 }

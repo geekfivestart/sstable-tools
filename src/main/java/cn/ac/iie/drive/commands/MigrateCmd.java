@@ -51,10 +51,11 @@ public class MigrateCmd extends ClusterTableCmd {
                 System.out.println(String.format("文件夹%s 不存在或无写入权限", path));
                 return false;
             }
-            System.out.println(String.format("迁移目录：%s", path));
         }
 
-        return super.validate() && expiredSecond > 0 && !"".equals(cronExpression) && migratePath.size() > 0;
+        return super.validate() && expiredSecond > 0
+                && !"".equals(cronExpression) && migratePath.size() > 0
+                && maxMigrateAttemptTimes > 0;
     }
 
     @Override

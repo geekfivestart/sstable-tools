@@ -10,18 +10,19 @@ import com.google.common.io.CharStreams;
 import com.jeffjirsa.cassandra.db.compaction.TimeWindowCompactionStrategy;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.CFStatement;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.ColumnFamilyStoreMBean;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.*;
-import org.apache.cassandra.tools.NodeProbe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,6 +51,46 @@ public class CassandraUtils {
     private static final Map<String, Long> maxWindowSizeSecondsMap = Maps.newConcurrentMap();
     private static final Map<String, Long> maxTimestampMap = Maps.newConcurrentMap();
     private static final Long million = 1000000L;
+    private static boolean loaded = false;
+
+    private static void shutdownBackgroundTasks() {
+        try {
+            if(!Config.isClientMode()) {
+                logger.info("共启动{}个后台任务，其中{}个正在执行中，{}个已完成",
+                        ScheduledExecutors.optionalTasks.getTaskCount(),
+                        ScheduledExecutors.optionalTasks.getActiveCount(),
+                        ScheduledExecutors.optionalTasks.getCompletedTaskCount());
+                ScheduledExecutors.optionalTasks.getQueue().forEach(runnable -> {
+                    if (runnable instanceof RunnableScheduledFuture) {
+                        RunnableScheduledFuture task = (RunnableScheduledFuture) runnable;
+                        if (task.cancel(true)) {
+                            logger.info("已停止一个{}类型的任务", task.getClass().getName());
+                        }
+                    }
+                });
+                ScheduledExecutors.optionalTasks.shutdown();
+                logger.info("共启动{}个后台任务，其中{}个正在执行中，{}个已完成",
+                        ScheduledExecutors.optionalTasks.getTaskCount(),
+                        ScheduledExecutors.optionalTasks.getActiveCount(),
+                        ScheduledExecutors.optionalTasks.getCompletedTaskCount());
+                try {
+                    CommitLog.instance.shutdownBlocking();
+                    logger.info("停止commit_log_service");
+                    ColumnFamilyStore.shutdownPostFlushExecutor();
+                    logger.info("停止mem_table_post_flush");
+                    MessagingService.instance().shutdown();
+                    logger.info("停止message_service");
+                    ScheduledExecutors.scheduledTasks.shutdown();
+                    ScheduledExecutors.nonPeriodicTasks.shutdown();
+                    ScheduledExecutors.scheduledFastTasks.shutdown();
+                } catch (Exception e) {
+                    logger.error(e.getMessage(), e);
+                }
+            }
+        } catch (Exception ignored){
+            logger.warn(ignored.getMessage(), ignored);
+        }
+    }
 
     /**
      * 获取keyspace元数据，优先从缓存中获取，若未缓存则从集群中获取
@@ -63,7 +104,10 @@ public class CassandraUtils {
         if(keyspaceMetadataMap.containsKey(keyspaceName)){
             return keyspaceMetadataMap.get(keyspaceName);
         } else{
-            Schema.instance.loadFromDisk(false);
+            if(!loaded) {
+                Schema.instance.loadFromDisk(false);
+                loaded = true;
+            }
             KeyspaceMetadata metadata = Schema.instance.getKSMetaData(keyspaceName);
             // 若集群中不存在相应的keyspace，则抛出运行时异常
             if(metadata == null ){
@@ -71,23 +115,7 @@ public class CassandraUtils {
                 throw new NoSuchKeyspaceException(String.format("不存在keyspace: %s", keyspaceName));
             }
             logger.info("从集群中获取了keyspace（{}）的元数据：{}", keyspaceName, metadata.toString());
-            logger.info("共启动{}个后台任务，其中{}个正在执行中，{}个已完成",
-                    ScheduledExecutors.optionalTasks.getTaskCount(),
-                    ScheduledExecutors.optionalTasks.getActiveCount(),
-                    ScheduledExecutors.optionalTasks.getCompletedTaskCount());
-            ScheduledExecutors.optionalTasks.getQueue().forEach(runnable -> {
-                if(runnable instanceof RunnableScheduledFuture){
-                    RunnableScheduledFuture task = (RunnableScheduledFuture) runnable;
-                    if(task.cancel(true)){
-                        logger.info("已停止一个{}类型的任务", task.getClass().getName());
-                    }
-                }
-            });
-            ScheduledExecutors.optionalTasks.shutdown();
-            logger.info("共启动{}个后台任务，其中{}个正在执行中，{}个已完成",
-                    ScheduledExecutors.optionalTasks.getTaskCount(),
-                    ScheduledExecutors.optionalTasks.getActiveCount(),
-                    ScheduledExecutors.optionalTasks.getCompletedTaskCount());
+            shutdownBackgroundTasks();
             keyspaceMetadataMap.put(keyspaceName, metadata);
             return metadata;
         }
