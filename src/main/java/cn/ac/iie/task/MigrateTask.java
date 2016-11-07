@@ -1,5 +1,6 @@
-package cn.ac.iie.migrate;
+package cn.ac.iie.task;
 
+import cn.ac.iie.migrate.MigrateUtils;
 import org.quartz.Job;
 import org.quartz.JobDetail;
 import org.quartz.JobExecutionContext;

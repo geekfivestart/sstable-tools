@@ -86,7 +86,12 @@ public class FileUtils {
      * @return 返回是否删除成功
      */
     public static boolean deleteFile(File file) {
-        return file.exists() && file.delete();
+        try {
+            return Files.deleteIfExists(file.toPath());
+        } catch (IOException e) {
+            LOG.error(e.getMessage(), e);
+            return false;
+        }
     }
 
     /**

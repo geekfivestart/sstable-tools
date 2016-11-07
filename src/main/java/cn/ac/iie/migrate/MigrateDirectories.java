@@ -4,7 +4,9 @@ import cn.ac.iie.utils.SortedList;
 import com.google.common.collect.Lists;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 数据迁移目标目录列表
@@ -106,6 +108,16 @@ public class MigrateDirectories {
             count = migrateDirectories.size();
         }
         return count;
+    }
+
+    /**
+     * 获取所有迁移目录的绝对路径
+     * @return 返回迁移目录集合
+     */
+    public Collection<String> getAllDir(){
+        Set<String> dirSet = new HashSet<>();
+        migrateDirectories.forEach(migrateDirectory -> dirSet.add(migrateDirectory.getAbsolutePath()));
+        return dirSet;
     }
 
 }

@@ -23,6 +23,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -403,5 +404,11 @@ public class CassandraUtils {
         } else {
             return Types.of(knownTypes.values().toArray(new UserType[0]));
         }
+    }
+
+    public static String getTableUid(String keyspaceName, String tableName)
+            throws NoSuchKeyspaceException, NoSuchTableException {
+        CFMetaData table = tableFromName(keyspaceName, tableName);
+        return table.cfName + "-" + ByteBufferUtil.bytesToHex(ByteBufferUtil.bytes(table.cfId));
     }
 }

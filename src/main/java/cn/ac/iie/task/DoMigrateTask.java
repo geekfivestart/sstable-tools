@@ -1,5 +1,6 @@
-package cn.ac.iie.migrate;
+package cn.ac.iie.task;
 
+import cn.ac.iie.migrate.MigrateUtils;
 import org.quartz.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -1,9 +1,6 @@
 package cn.ac.iie.drive;
 
-import cn.ac.iie.drive.commands.DescribeCmd;
-import cn.ac.iie.drive.commands.MigrateCmd;
-import cn.ac.iie.drive.commands.SSTableCmd;
-import cn.ac.iie.drive.commands.TimestampCmd;
+import cn.ac.iie.drive.commands.*;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import io.airlift.command.*;
@@ -21,7 +18,9 @@ public class Driver {
                 SSTableCmd.class,
                 DescribeCmd.class,
                 TimestampCmd.class,
-                MigrateCmd.class
+                MigrateCmd.class,
+                RestoreCmd.class,
+                CleanupCmd.class
         );
         Cli.CliBuilder<Runnable> builder = Cli.builder("sstable-tools");
 
