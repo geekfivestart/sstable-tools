@@ -5,6 +5,7 @@ import cn.ac.iie.cassandra.NoSuchKeyspaceException;
 import cn.ac.iie.cassandra.NoSuchTableException;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
+import com.google.common.collect.Lists;
 import com.google.common.collect.MinMaxPriorityQueue;
 import jline.console.ConsoleReader;
 import org.apache.cassandra.config.CFMetaData;
@@ -334,8 +335,8 @@ public class SSTableUtils {
             out.printf("%sEstimated droppable tombstones%s:%s %s%n", c, s, r, stats.getEstimatedDroppableTombstoneRatio((int) (System.currentTimeMillis() / 1000)));
             out.printf("%sSSTable Level%s:%s %d%n", c, s, r, stats.sstableLevel);
             out.printf("%sRepaired at%s:%s %d %s%n", c, s, r, stats.repairedAt, toDateString(stats.repairedAt, TimeUnit.MILLISECONDS, color));
-            out.printf("  %sLower bound%s:%s %s%n", c, s, r, stats.commitLogLowerBound);
-            out.printf("  %sUpper bound%s:%s %s%n", c, s, r, stats.commitLogUpperBound);
+          //  out.printf("  %sLower bound%s:%s %s%n", c, s, r, stats.commitLogLowerBound);
+          //  out.printf("  %sUpper bound%s:%s %s%n", c, s, r, stats.commitLogUpperBound);
             out.printf("%stotalColumnsSet%s:%s %s%n", c, s, r, stats.totalColumnsSet);
             out.printf("%stotalRows%s:%s %s%n", c, s, r, stats.totalRows);
             out.printf("%sEstimated tombstone drop times%s:%s%n", c, s, r);
@@ -346,13 +347,15 @@ public class SSTableUtils {
             String histoColor = color ? "\u001B[37m" : "";
             out.printf("%s  %-" + h.maxValueLength + "s                       | %-" + h.maxCountLength + "s   %%   Histogram %n", bcolor, "Value", "Count");
             stats.estimatedTombstoneDropTime.getAsMap().entrySet().forEach(e -> {
-                String histo = h.asciiHistogram(e.getValue(), 30);
+                //fix me later
+                String histo = h.asciiHistogram(e.getValue()[0], 30);
                 out.printf(reset +
                                 "  %-" + h.maxValueLength + "d %s %s|%s %" + h.maxCountLength + "s %s %s%s %n",
                         e.getKey().longValue(), toDateString(e.getKey().intValue(), TimeUnit.SECONDS, color),
                         bcolor, reset,
                         e.getValue(),
-                        wrapQuiet(String.format("%3s", (int) (100 * (e.getValue() / h.sum))), color),
+                        //fix me later
+                        wrapQuiet(String.format("%3s", (int) (100 * (e.getValue()[0] / h.sum))), color),
                         histoColor,
                         histo);
             });
@@ -458,11 +461,14 @@ public class SSTableUtils {
             }
         }
 
-        TermHistogram(Collection<Map.Entry<Double, Long>> histogram) {
+        TermHistogram(Set<Map.Entry<Number, long[]>> histogram) {
             histogram.forEach(e -> {
+                //fix me later
+                /*
                 max = Math.max(max, e.getValue());
                 min = Math.min(min, e.getValue());
                 sum += e.getValue();
+                */
                 maxCountLength = Math.max(maxCountLength, ("" + e.getValue()).length());
                 maxValueLength = Math.max(maxValueLength, ("" + e.getKey().longValue()).length());
             });

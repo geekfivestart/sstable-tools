@@ -7,7 +7,6 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.io.CharStreams;
-import com.jeffjirsa.cassandra.db.compaction.TimeWindowCompactionStrategy;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Config;
@@ -19,6 +18,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
+import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.net.MessagingService;
@@ -312,6 +312,7 @@ public class CassandraUtils {
             return maxWindowSizeSecondsMap.get(ksTableName);
         }
         CFMetaData metaData = tableFromKeyspace(keyspaceName, tableName);
+        logger.info("compaction class:{}",metaData.params.compaction.klass().getName());
         if(DateTieredCompactionStrategy.class.isAssignableFrom(metaData.params.compaction.klass())) {
             // 如果合并策略设置为DateTieredCompactionStrategy，则元数据中应包含max_window_size_seconds
             // 若不包含该属性，则有可能是集群出现问题，应首先检查集群健康状态及相关keyspace与table状态
