@@ -49,9 +49,11 @@ public class FileUtils {
     public static boolean noOthersUsing(File f){
         boolean noUsing = false;
         FileLock lock = null;
+        RandomAccessFile raf=null;
+        FileChannel channel=null;
         try {
-            RandomAccessFile raf = new RandomAccessFile(f, "rw");
-            FileChannel channel = raf.getChannel();
+            raf = new RandomAccessFile(f, "rw");
+            channel = raf.getChannel();
             lock = channel.tryLock();
             noUsing = lock.isValid();
         } catch (FileNotFoundException e) {
@@ -66,6 +68,18 @@ public class FileUtils {
                     LOG.error(e.getMessage(), e);
                 }
             }
+           if(channel!=null){
+               try {
+                   channel.close();
+               } catch (IOException e) {
+               }
+           }
+           if(raf!=null){
+               try {
+                   raf.close();
+               } catch (IOException e) {
+               }
+           }
         }
         return noUsing;
     }
