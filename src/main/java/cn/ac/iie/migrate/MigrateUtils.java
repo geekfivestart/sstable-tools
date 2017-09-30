@@ -24,8 +24,8 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 
 import static cn.ac.iie.utils.FileUtils.*;
-import static org.quartz.JobBuilder.newJob;
-import static org.quartz.TriggerBuilder.newTrigger;
+import org.quartz.JobBuilder;
+import org.quartz.TriggerBuilder;
 
 /**
  * 文件迁移工具类
@@ -76,11 +76,11 @@ public class MigrateUtils {
 
             // 创建主任务，该任务主要负责创建ssTable迁移子任务
             // 所有迁移操作实际上均在迁移子任务中执行
-            JobDetail job = newJob(MigrateTask.class)
+            JobDetail job = JobBuilder.newJob(MigrateTask.class)
                     .withIdentity(MAIN_MIGRATE_JOB, MIGRATE_JOB)
                     .withDescription("冷数据迁移任务")
                     .build();
-            CronTrigger trigger = newTrigger()
+            CronTrigger trigger = TriggerBuilder.newTrigger()
                     .withIdentity(MAIN_MIGRATE_TRIGGER, MIGRATE_TRIGGER)
                     .withSchedule(CronScheduleBuilder.cronSchedule(Options.instance.cronExpression))
                     .build();
@@ -428,7 +428,7 @@ public class MigrateUtils {
     /**
      * 清理迁移目录，删除无用ssTable文件<br/>
      * 由于cassandra执行compact、删除或数据过期等原因，
-     * 可能会导出cassandra将ssTable文件删除，若此前该文件执行过
+     * 可能会导致cassandra将ssTable文件删除，若此前该文件执行过
      * 迁移操作则cassandra仅将软连接文件删除而不会删除真正的ssTable数据文件，
      * 从而产生废弃ssTable文件。<br/>
      * 因此，需要执行清理操作以删除废弃ssTable文件

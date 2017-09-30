@@ -72,6 +72,11 @@ public class CassandraUtils {
                         }
                     }
                 });
+
+                ScheduledExecutors.optionalTasks.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+                ScheduledExecutors.scheduledTasks.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+                ScheduledExecutors.scheduledFastTasks.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+
                 ScheduledExecutors.optionalTasks.shutdown();
                 logger.info("共启动{}个后台任务，其中{}个正在执行中，{}个已完成",
                         ScheduledExecutors.optionalTasks.getTaskCount(),
