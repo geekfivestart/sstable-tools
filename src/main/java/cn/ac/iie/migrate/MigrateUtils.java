@@ -148,7 +148,7 @@ public class MigrateUtils {
                 delaySecond > 5? delaySecond: 5,
                 DateBuilder.IntervalUnit.SECOND);
         String jobName = ssTable.getName()+".NO."+attempt;
-        JobDetail job = newJob(DoMigrateTask.class)
+        JobDetail job = JobBuilder.newJob(DoMigrateTask.class)
                 .withIdentity(jobName + MIGRATE_JOB_SUFFIX, DO_MIGRATE_JOB)
                 .withDescription("冷数据迁移任务")
                 .build();
@@ -158,7 +158,7 @@ public class MigrateUtils {
         job.getJobDataMap().put("attempt", attempt);
         // 由于该任务不是定时任务，因此只需要设置一个
         // 简单触发器在到达延迟时间时刻执行一次即可
-        SimpleTrigger trigger = (SimpleTrigger) newTrigger()
+        SimpleTrigger trigger = (SimpleTrigger) TriggerBuilder.newTrigger()
                 .withIdentity(jobName + MIGRATE_TRIGGER_SUFFIX, DO_MIGRATE_TRIGGER)
                 .startAt(startTime)
                 .build();
@@ -407,11 +407,11 @@ public class MigrateUtils {
     }
 
     private static void startCleanupTask(){
-        JobDetail job = newJob(CleanupTask.class)
+        JobDetail job = JobBuilder.newJob(CleanupTask.class)
                 .withIdentity(DO_CLEANUP_JOB, CLEANUP_JOB)
                 .withDescription("废弃ssTable清理任务")
                 .build();
-        CronTrigger trigger = newTrigger()
+        CronTrigger trigger = TriggerBuilder.newTrigger()
                 .withIdentity(DO_CLEANUP_TRIGGER, CLEANUP_TRIGGER)
                 .withSchedule(CronScheduleBuilder.cronSchedule(DEFAULT_CRON_EXP))
                 .build();
