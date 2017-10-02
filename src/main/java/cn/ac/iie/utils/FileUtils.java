@@ -118,13 +118,13 @@ public class FileUtils {
         try {
             // 将源文件移动至目标文件，同时需要拷贝文件属性
             Files.copy(sourcePath, targetPath, REPLACE_EXISTING, COPY_ATTRIBUTES);
-            LOG.info("成功将文件{} 拷贝至{}", sourcePath.toString(), targetPath.toString());
+            LOG.info("{} has been copied to {}", sourcePath.toString(), targetPath.toString());
             copied = true;
         } catch (IOException e) {
-            LOG.error("文件拷贝出现IO异常，源文件：{}，目标文件：{}", sourcePath.toString(), targetPath.toString());
+            LOG.error("IOException encountered during file copy, src:{},dst:{}", sourcePath.toString(), targetPath.toString());
             LOG.error(e.getMessage(), e);
         } catch (Exception e) {
-            LOG.error("文件拷贝出现其它异常，源文件：{}，目标文件：{}", sourcePath.toString(), targetPath.toString());
+            LOG.error("Exception encountered during file copy, src:{},dst:{}", sourcePath.toString(), targetPath.toString());
             LOG.error(e.getMessage(), e);
         }
         return copied;
@@ -143,13 +143,13 @@ public class FileUtils {
             Files.createSymbolicLink(
                     linkPath,
                     targetPath);
-            LOG.info("成功创建软连接{}，连接目标：{}", linkPath.toString(), targetPath.toString());
+            LOG.info("Symbol link created, src:{}，dst:{}", linkPath.toString(), targetPath.toString());
         } catch (IOException e) {
-            LOG.error("创建软连接{} 出现IO异常，连接目标：{}", linkPath.toString(), targetPath.toString());
+            LOG.error("IOException encountered when creating symbol line, src:{} dst:{}", linkPath.toString(), targetPath.toString());
             LOG.error(e.getMessage(), e);
             created = false;
         } catch (Exception e){
-            LOG.error("创建软连接{} 出现其它异常，连接目标：{}", linkPath.toString(), targetPath.toString());
+            LOG.error("Exception encountered when creating symbol line, src:{} dst:{}", linkPath.toString(), targetPath.toString());
             LOG.error(e.getMessage(), e);
             created = false;
 

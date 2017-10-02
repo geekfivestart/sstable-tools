@@ -44,8 +44,8 @@ public class CleanupTask implements Job {
     public void execute(JobExecutionContext context) throws JobExecutionException {
         String jobName = context.getJobDetail().getKey().getName();
         String jobId = UUID.randomUUID().toString();
-        LOG.info("开始执行任务:{}-{}", jobName, jobId);
+        LOG.info("Starting Task:{}-{}", jobName, jobId);
         MigrateUtils.cleanUpMigrateDirs();
-        LOG.info("任务执行完毕:{}-{}", jobName, jobId);
+        LOG.info("Task finished:{}-{}", jobName, jobId);
     }
 }

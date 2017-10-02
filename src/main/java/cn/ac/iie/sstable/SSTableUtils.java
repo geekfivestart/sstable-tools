@@ -68,12 +68,12 @@ public class SSTableUtils {
 
         CFMetaData metadata;
         if (!Strings.isNullOrEmpty(cqlOverride)) {
-            logger.debug("使用cql覆盖的元数据");
+            logger.debug("Using metadata from CQL");
             metadata = CassandraUtils.tableFromCQL(new ByteArrayInputStream(cqlOverride.getBytes()));
         } else {
             InputStream in = findSchema();
             if (in == null) {
-                logger.debug("使用SSTable元数据");
+                logger.debug("Using metadata from SSTable");
                 metadata = SSTableUtils.tableFromSSTable(ssTablePath);
             } else {
                 metadata = CassandraUtils.tableFromCQL(in);

@@ -23,9 +23,9 @@ public class MigrateTask implements Job {
     public void execute(JobExecutionContext jobExecutionContext) throws JobExecutionException {
         JobDetail job = jobExecutionContext.getJobDetail();
         String jobName = job.getKey().getName();
-        LOG.info("开始执行任务<{}>", jobName);
+        LOG.info("Starting migration task[{}]", jobName);
         MigrateUtils.startDoMigrateTask();
         Date nextTime = jobExecutionContext.getNextFireTime();
-        LOG.info("任务<{}>执行完毕，下一次执行时间为：{}", jobName, MigrateUtils.DATE_FORMAT.format(nextTime));
+        LOG.info("Task [{}] completed，and will be executed again on {}", jobName, MigrateUtils.DATE_FORMAT.format(nextTime));
     }
 }

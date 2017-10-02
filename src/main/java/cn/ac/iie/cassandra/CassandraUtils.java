@@ -60,7 +60,7 @@ public class CassandraUtils {
     private static void shutdownBackgroundTasks() {
         try {
             if(!Config.isClientMode()) {
-                logger.info("共启动{}个后台任务，其中{}个正在执行中，{}个已完成",
+                logger.info("{} task(s) in total，{} task(s) is running，{} task(s) completed",
                         ScheduledExecutors.optionalTasks.getTaskCount(),
                         ScheduledExecutors.optionalTasks.getActiveCount(),
                         ScheduledExecutors.optionalTasks.getCompletedTaskCount());
@@ -68,7 +68,7 @@ public class CassandraUtils {
                     if (runnable instanceof RunnableScheduledFuture) {
                         RunnableScheduledFuture task = (RunnableScheduledFuture) runnable;
                         if (task.cancel(true)) {
-                            logger.info("已停止一个{}类型的任务", task.getClass().getName());
+                            logger.info("The task {} has been stopped", task.getClass().getName());
                         }
                     }
                 });
@@ -78,17 +78,14 @@ public class CassandraUtils {
                 ScheduledExecutors.scheduledFastTasks.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
 
                 ScheduledExecutors.optionalTasks.shutdown();
-                logger.info("共启动{}个后台任务，其中{}个正在执行中，{}个已完成",
+                logger.info("{} task(s) in total，{} task(s) is running，{} task(s) completed",
                         ScheduledExecutors.optionalTasks.getTaskCount(),
                         ScheduledExecutors.optionalTasks.getActiveCount(),
                         ScheduledExecutors.optionalTasks.getCompletedTaskCount());
                 try {
                     CommitLog.instance.shutdownBlocking();
-                    logger.info("停止commit_log_service");
                     ColumnFamilyStore.shutdownPostFlushExecutor();
-                    logger.info("停止mem_table_post_flush");
                     MessagingService.instance().shutdown();
-                    logger.info("停止message_service");
                     ScheduledExecutors.scheduledTasks.shutdown();
                     ScheduledExecutors.nonPeriodicTasks.shutdown();
                     ScheduledExecutors.scheduledFastTasks.shutdown();
@@ -120,10 +117,10 @@ public class CassandraUtils {
             KeyspaceMetadata metadata = Schema.instance.getKSMetaData(keyspaceName);
             // 若集群中不存在相应的keyspace，则抛出运行时异常
             if(metadata == null ){
-                logger.error("不存在keyspace: {}", keyspaceName);
-                throw new NoSuchKeyspaceException(String.format("不存在keyspace: %s", keyspaceName));
+                logger.error("keyspace not exist: {}", keyspaceName);
+                throw new NoSuchKeyspaceException(String.format("keyspace not exist: %s", keyspaceName));
             }
-            logger.info("从集群中获取了keyspace（{}）的元数据：{}", keyspaceName, metadata.toString());
+            logger.info("Get meta data of keyspace({}) {} from cluster", keyspaceName, metadata.toString());
             shutdownBackgroundTasks();
             keyspaceMetadataMap.put(keyspaceName, metadata);
             return metadata;
@@ -147,10 +144,10 @@ public class CassandraUtils {
         KeyspaceMetadata ksMetaData = keyspaceFromName(keyspaceName);
         CFMetaData tableMetaData = ksMetaData.getTableOrViewNullable(tableName);
         if(tableMetaData == null){
-            logger.error("表不存在： {}", tableName);
+            logger.error("table not exist:{}", tableName);
             throw new NoSuchTableException(String.format("表不存在: %s", tableName));
         }
-        logger.info("从keyspace（{}）元数据中获取了table（{}）的元数据：{}",
+        logger.info("Get metadata from keyspace（{}） for table（{}）:{}",
                 keyspaceName, tableName, tableMetaData.toString());
         cfMetaDataMap.put(ksTableName, tableMetaData);
         return tableMetaData;
@@ -209,7 +206,7 @@ public class CassandraUtils {
         try {
             keyspace = statement.keyspace() == null ? "sstable_tools" : statement.keyspace();
         } catch (AssertionError e) { // 如果添加-ea选项可能会打印大量警告日志
-            logger.warn("在使用sstable-tools工具时请删除-ea选项");
+            logger.warn("-ea parameter is not recommanded");
             keyspace = "sstable_tools";
         }
         // 设置keyspace元数据，
@@ -329,7 +326,7 @@ public class CassandraUtils {
                 maxWindowSizeSecondsMap.put(ksTableName, secondDigit);
                 return secondDigit;
             } else {
-                throw new Exception("不存在max_window_size_seconds属性，请确认schema是否正确");
+                throw new Exception("Property [max_window_size_seconds] not exist，please check the schema");
             }
         } else if(TimeWindowCompactionStrategy.class.isAssignableFrom(metaData.params.compaction.klass())){
             // 如果合并策略设置为TimeWindowCompactionStrategy，
@@ -340,13 +337,13 @@ public class CassandraUtils {
             if (params.containsKey("compaction_window_size")) {
                 size = params.get("compaction_window_size");
             } else {
-                throw new Exception("不存在compaction_window_size属性，请确认schema是否正确");
+                throw new Exception("Property [compaction_window_size] not exist，please check the schema");
             }
             if(params.containsKey("compaction_window_unit")){
                 unit = params.get("compaction_window_unit");
             } else{
 
-                throw new Exception("不存在compaction_window_unit属性，请确认schema是否正确");
+                throw new Exception("Property [compaction_window_unit] not exist，please check the schema");
             }
             Long secondDigit;
             switch (unit){
@@ -360,13 +357,13 @@ public class CassandraUtils {
                     secondDigit= Long.parseLong(size) * 86400;
                     break;
                 default:
-                    throw new Exception(String.format("compaction_window_unit设置不正确：%s", unit));
+                    throw new Exception(String.format("[compaction_window_unit not] not correct：%s", unit));
             }
             maxWindowSizeSecondsMap.put(ksTableName, secondDigit);
             return secondDigit;
         } else {
-            throw new Exception(String.format("表%s.%s的合并策略应为DateTieredCompactionStrategy、TimeWindowCompactionStrategy,而不是%s",
-                    keyspaceName, tableName, InvokeUtils.genericSuperclass(metaData.params.compaction.klass())));
+            throw new Exception(String.format("DateTieredCompactionStrategy、TimeWindowCompactionStrategy expected for %s.%s, " +
+                            "rather than %s", keyspaceName, tableName, InvokeUtils.genericSuperclass(metaData.params.compaction.klass())));
         }
     }
 
@@ -375,14 +372,14 @@ public class CassandraUtils {
      * @param ssTablePath SSTable文件路径
      * @return 返回最大时间戳
      */
-    private static Long maxTimestampOfSSTable(String ssTablePath) throws Exception {
+    public static Long maxTimestampOfSSTable(String ssTablePath) throws Exception {
         // 从SSTable元数据中获取
         Long maxTimestamp = SSTableUtils.maxTimestamp(ssTablePath);
         if (maxTimestamp <= 0) {
-            throw new Exception(String.format("文件%s的最大时间戳不正确", ssTablePath));
+            throw new Exception(String.format("The timestamp of %s is not correct", ssTablePath));
         }
-        logger.info("获取STable文件： {} 的最大时间戳：{}，格式化时间为：{}",
-                ssTablePath, maxTimestamp, SSTableUtils.toDateString(maxTimestamp, TimeUnit.MICROSECONDS, false));
+        //logger.info("STable：{} MaxTimestamp：{}({})",
+         //       ssTablePath, maxTimestamp, SSTableUtils.toDateString(maxTimestamp, TimeUnit.MICROSECONDS, false));
         return maxTimestamp;
     }
 

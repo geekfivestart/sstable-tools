@@ -40,10 +40,10 @@ public class DoMigrateTask implements Job {
 
         File ssTable = (File) context.getJobDetail().getJobDataMap().get("sstable");
         int attempt = (Integer) context.getJobDetail().getJobDataMap().get("attempt");
-        LOG.info("开始第{}次尝试对{}执行迁移任务<{}>", attempt+1,ssTable.getName(), jobName);
+        LOG.info("The {} time to migrate {}, task:[{}]", attempt+1,ssTable.getName(), jobName);
         long st=System.currentTimeMillis();
         boolean success = MigrateUtils.doMigrate(ssTable, attempt);
         long timeEla= System.currentTimeMillis()-st;
-        LOG.info("任务<{}>，第{}次执行结果：{}, Time elapsed:{}ms", jobName, attempt+1, success?"成功":"失败",timeEla);
+        LOG.info("Task[{}]，The {} time run {}, Time elapsed:{}ms", jobName, attempt+1, success?"Success":"Fail",timeEla);
     }
 }

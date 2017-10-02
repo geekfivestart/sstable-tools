@@ -4,6 +4,7 @@ import cn.ac.iie.cassandra.CassandraUtils;
 import cn.ac.iie.cassandra.NoSuchKeyspaceException;
 import cn.ac.iie.cassandra.NoSuchTableException;
 import cn.ac.iie.drive.Options;
+import cn.ac.iie.sstable.SSTableUtils;
 import cn.ac.iie.task.CleanupTask;
 import cn.ac.iie.task.DoMigrateTask;
 import cn.ac.iie.task.MigrateTask;
@@ -22,10 +23,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import static cn.ac.iie.utils.FileUtils.*;
 import org.quartz.JobBuilder;
 import org.quartz.TriggerBuilder;
+import sun.reflect.annotation.ExceptionProxy;
 
 /**
  * 文件迁移工具类
@@ -60,7 +63,7 @@ public class MigrateUtils {
      * 并开启针对单个ssTable的迁移子任务
      */
     public static void startMigrate(){
-        LOG.info("设置定时冷数据迁移任务，执行时间表达式：{}", Options.instance.cronExpression);
+        LOG.info("Cold migration is arranged，cront exp：{}", Options.instance.cronExpression);
         int diskCount = Options.instance.migrateDirectories.dirCount();
         try {
             Properties p = new Properties();
@@ -85,7 +88,7 @@ public class MigrateUtils {
                     .withSchedule(CronScheduleBuilder.cronSchedule(Options.instance.cronExpression))
                     .build();
             Date startTime = scheduler.scheduleJob(job, trigger);
-            LOG.info("迁移任务即将在 {} 开始执行", DATE_FORMAT.format(startTime));
+            LOG.info("Migration task will be started on {}", DATE_FORMAT.format(startTime));
             scheduler.start();
             startCleanupTask();
 //            while (true){
@@ -99,7 +102,7 @@ public class MigrateUtils {
 //            }
         } catch (Exception e) {
             LOG.error(e.getMessage(), e);
-            LOG.error("冷数据迁移异常退出");
+            LOG.error("Data Migration Exception");
             System.exit(-1);
         }
     }
@@ -113,7 +116,7 @@ public class MigrateUtils {
         try {
             int existsTaskCount = scheduler.getJobKeys(GroupMatcher.groupContains(DO_MIGRATE_JOB)).size();
             if(existsTaskCount > 0){
-                LOG.warn("当前还有{}个任务正在运行， 下次重试", existsTaskCount);
+                LOG.warn("{} task(s) running， try next time", existsTaskCount);
                 return;
             }
             List<File> files = CassandraUtils.expiredSSTableFromName(
@@ -121,13 +124,21 @@ public class MigrateUtils {
                     Options.instance.tbName,
                     Options.instance.expiredSecond);
 
+            files.forEach(file-> {
+                try {
+                    long maxtime = CassandraUtils.maxTimestampOfSSTable(file.getAbsolutePath());
+                    LOG.info("{} {}({})", file.getAbsolutePath(),maxtime, SSTableUtils.toDateString(maxtime,
+                            TimeUnit.MICROSECONDS, false));
+                }catch(Exception ex){
+                }
+            });
+            LOG.info("{} file(s) to be migrated", files.size());
             // 对每个文件创建迁移任务，并在5秒钟后开始执行
             files.forEach(file -> startDoMigrateTask(file, 0, 5));
 
         } catch (Exception e) {
             LOG.error(e.getMessage(), e);
 
-            LOG.error("冷数据迁移异常退出");
             System.exit(-1);
         }
     }
@@ -165,13 +176,13 @@ public class MigrateUtils {
 
         try {
             startTime = scheduler.scheduleJob(job, trigger);
-            LOG.info("对sstable（{}）的迁移任务即将在 {} 开始第{}次执行",
+            LOG.info("Migration of sstable（{}）will be started on {} for the {}nd/th time",
+
                     ssTable.getName(),
                     DATE_FORMAT.format(startTime),
                     attempt+1);
         } catch (SchedulerException e) {
             LOG.error(e.getMessage(), e);
-            LOG.error("冷数据迁移异常退出");
             // 若任务执行出现异常，则有可能系统出现问题，
             // 因此，此处暂时选择退出程序
             System.exit(-1);
@@ -194,7 +205,6 @@ public class MigrateUtils {
             directory = Options.instance.migrateDirectories.poll(0, 10);
         } catch (InterruptedException e) {
             LOG.error(e.getMessage(), e);
-            LOG.error("冷数据迁移异常退出");
 //                System.exit(-1);
         }
         // 若未能从列表中取出目标路径或者ssTable被cassandra占用，
@@ -227,9 +237,9 @@ public class MigrateUtils {
         // 若尝试次数超过最大尝试次数，则不再进行重试
         if(!migrated){
             if(attempt >= Options.instance.maxMigrateAttemptTimes){
-                LOG.error("迁移尝试次数超过最大尝试次数: {}， 请检查磁盘并尝试重新开始迁移",
+                LOG.error("Migration task run {} times, still not success",
                         Options.instance.maxMigrateAttemptTimes);
-                LOG.error("请检查以下未迁移成功sstable： {}", failedFiles.toString());
+                LOG.error("Migration task run %s times, still not success", failedFiles.toString());
             } else {
                 startDoMigrateTask(file, attempt + 1, 300);
             }
@@ -276,7 +286,7 @@ public class MigrateUtils {
 
                 if (!migrated) {
                     if (!deleteFile(targetFile)) {
-                        LOG.warn("迁移失败，但目标文件未能删除：{}", targetFile.getAbsolutePath());
+                        LOG.warn("Migration failed，dest file cannot be deleted：{}", targetFile.getAbsolutePath());
                     }
                     return false;
                 }
@@ -288,7 +298,7 @@ public class MigrateUtils {
             }
             if (migrated) {
                 if(!deleteFile(tmpFile)){
-                    LOG.warn("迁移成功，但临时文件未能删除：{}", tmpFile.getAbsolutePath());
+                    LOG.warn("Migration success，tmp file deleted failed：{}", tmpFile.getAbsolutePath());
                 }
             }
             else{
@@ -297,7 +307,7 @@ public class MigrateUtils {
                 //noinspection ResultOfMethodCallIgnored
                 tmpFile.renameTo(new File(sourceAbsolutePath));
                 if(!deleteFile(targetFile)){
-                    LOG.warn("迁移失败，但目标文件已建立且未能删除：{}", targetFile.getAbsolutePath());
+                    LOG.warn("Migration failed，dst file created but delete failed：{}", targetFile.getAbsolutePath());
                 }
             }
         }
@@ -313,13 +323,13 @@ public class MigrateUtils {
         File ssTable = new File(ssTablePath);
         String absolutePath = ssTable.getAbsolutePath();
         if(!ssTable.exists()){
-            LOG.error("文件{}不存在", absolutePath);
-            System.err.printf("文件%s不存在%n", absolutePath);
+            LOG.error("file {} not exist", absolutePath);
+            System.err.printf("file %s not exist", absolutePath);
             System.exit(1);
         }
         if(!Files.isSymbolicLink(ssTable.toPath())){
-            LOG.error("文件{}不是软连接，无需还原", absolutePath);
-            System.err.printf("文件%s不是软连接，无需还原%n", absolutePath);
+            LOG.error("File {} is not symbol link，not need to restore", absolutePath);
+            System.err.printf("File %s is not symbol link，not need to restore", absolutePath);
             System.exit(1);
         }
         Path targetPath;
@@ -361,44 +371,44 @@ public class MigrateUtils {
             if (deleted){
                 if(tmp.renameTo(ssTable)){
                     if(deleteFile(linkedPath.toFile())){
-                        LOG.info("文件{}成功还原至{}",
+                        LOG.info("File {} has been restored to {}",
                                 linkedPath.toString(), ssTable.getAbsolutePath());
-                        System.out.printf("文件%s成功还原至%s%n",
+                        System.out.printf("File %s has been restored to %s",
                                 linkedPath.toString(), ssTable.getAbsolutePath());
                     } else{
-                        LOG.warn("文件{}成功还原至{}，但原文件未能删除%n",
+                        LOG.warn("File {} has been restored to {},but src file deleted failed",
                                 linkedPath.toString(), ssTable.getAbsolutePath());
-                        System.out.printf("文件%s成功还原至%s，但原文件未能删除%n",
+                        System.out.printf("File %s has been restored to %s,but src file deleted failed",
                                 linkedPath.toString(), ssTable.getAbsolutePath());
                     }
                 } else{
-                    LOG.error("文件还原失败，原因：将临时文件{}重命名为{}操作执行失败",
+                    LOG.error("restore file failed，since rename tmp file {} to {} failed",
                             tmp.getAbsolutePath(), ssTable.getAbsolutePath());
-                    System.err.printf("文件还原失败，原因：将临时文件%s重命名为%s操作执行失败%n",
+                    System.err.printf("restore file failed，since rename tmp file %s to %s failed",
                             tmp.getAbsolutePath(), ssTable.getAbsolutePath());
                     if(!createSymbolicLink(ssTable.toPath(), linkedPath)){
-                        LOG.warn("还原软连接失败，请手动执行命令：ln -s {} {}",
+                        LOG.warn("restore symbol link failed，please execute shell command manually：ln -s {} {}",
                                 ssTable.getAbsolutePath(), linkedPath.toString());
-                        System.err.printf("还原软连接失败，请手动执行命令：ln -s %s %s%n",
+                        System.err.printf("restore symbol link failed，please execute shell command manually：ln -s %s %s",
                                 ssTable.getAbsolutePath(), linkedPath.toString());
                     }
                     if(!deleteFile(tmp)){
-                        LOG.warn("删除临时文件{}失败，请手动执行命令：rm -rf {}",
+                        LOG.warn("delete tmp file {} failed，please execute shell command manually：rm -rf {}",
                                 tmp.getAbsolutePath(), tmp.getAbsolutePath());
-                        System.err.printf("删除临时文件%s失败，请手动执行命令：rm -rf %s%n",
+                        System.err.printf("delete tmp file %s failed，please execute shell command manually：rm -rf %s",
                                 tmp.getAbsolutePath(), tmp.getAbsolutePath());
                     }
                 }
             } else {
-                System.err.printf("还原失败，原因：删除文件%s失败%n", ssTable.getAbsolutePath());
-                LOG.error("还原失败，原因：删除文件{}失败", ssTable.getAbsolutePath());
+                System.err.printf("restore failed，since file {} cannot be deleted", ssTable.getAbsolutePath());
+                LOG.error("restore failed，since file %s cannot be deleted", ssTable.getAbsolutePath());
                 if(!deleteFile(tmp)){
-                    System.err.printf("还原失败，且临时文件%s已创建且未能正常删除%n", tmp.getAbsolutePath());
-                    LOG.warn("还原失败，且临时文件{}已创建且未能正常删除", tmp.getAbsolutePath());
+                    System.err.printf("restore failed，tmp file {} has been created, but deleted failed", tmp.getAbsolutePath());
+                    LOG.warn("restore failed，tmp file %s has been created, but deleted failed", tmp.getAbsolutePath());
                 }
             }
         } else{
-            System.err.printf("将文件%s拷贝至%s出现错误%n", linkedPath.toString(), tmp.getAbsolutePath());
+            System.err.printf("Copying %s to %s failed", linkedPath.toString(), tmp.getAbsolutePath());
         }
     }
 
@@ -418,7 +428,7 @@ public class MigrateUtils {
         Date startTime;
         try {
             startTime = scheduler.scheduleJob(job, trigger);
-            LOG.info("废弃ssTable清理任务即将在 {} 开始执行",
+            LOG.info("The task of cleanning discard ssTable will be started at {}",
                     DATE_FORMAT.format(startTime));
         } catch (SchedulerException e) {
             LOG.error(e.getMessage(), e);
