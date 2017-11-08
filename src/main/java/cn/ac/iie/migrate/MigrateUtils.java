@@ -90,7 +90,7 @@ public class MigrateUtils {
             Date startTime = scheduler.scheduleJob(job, trigger);
             LOG.info("Migration task will be started on {}", DATE_FORMAT.format(startTime));
             scheduler.start();
-            startCleanupTask();
+//            startCleanupTask();
 //            while (true){
 //                if(scheduler.getTriggerState(
 //                        new TriggerKey(MAIN_MIGRATE_TRIGGER,
@@ -451,6 +451,7 @@ public class MigrateUtils {
             tblId = CassandraUtils.getTableUid(Options.instance.ksName, Options.instance.tbName);
             //获取当前所有的ssTable文件用于检测迁移目录下的文件是否已被删除
             ssTableList = CassandraUtils.ssTableFromName(Options.instance.ksName, Options.instance.tbName, true);
+            LOG.info("All sstable num:{}",ssTableList.size());
         } catch (NoSuchKeyspaceException | NoSuchTableException e) {
             LOG.error(e.getMessage(), e);
             return;
@@ -464,8 +465,10 @@ public class MigrateUtils {
         拥有不同的编号，因此迁移目录下的ssTable名称必然不会重复，
         故而可以使用ssTable名称作为HashMap的key。
          */
+        LOG.info("dir:{}",migrateDirs);
         migrateDirs.forEach(dir -> {
             String migratePath = join(dir, Options.instance.ksName, tblId);
+            LOG.info("migratePath:{}",migratePath);
             File migrateDir = new File(migratePath);
             if(migrateDir.exists() && migrateDir.isDirectory()){
                 try {
@@ -481,6 +484,7 @@ public class MigrateUtils {
             }
         });
 
+        LOG.info("Num of sstables on cold path:{}",migratedSsTableFileMap.size());
         doCleanup(migratedSsTableFileMap, ssTableList);
     }
 
@@ -499,7 +503,10 @@ public class MigrateUtils {
     public static void doCleanup(Map<String, File> migratedSsTableFileMap, List<File> ssTableList){
         Set<String> ssTableSet = migratedSsTableFileMap.keySet();
         ssTableList.forEach(onlineSsTable -> ssTableSet.remove(onlineSsTable.getName()));
-        ssTableSet.forEach(offlineSsTable -> deleteFile(migratedSsTableFileMap.get(offlineSsTable)));
+        ssTableSet.forEach(offlineSsTable -> {
+            LOG.debug("delete {}",offlineSsTable);
+            deleteFile(migratedSsTableFileMap.get(offlineSsTable));
+            });
     }
 
 }

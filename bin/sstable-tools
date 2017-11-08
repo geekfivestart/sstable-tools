@@ -69,26 +69,25 @@ function migrate_conf(){
     expired_second=$(sed -n "s/^[^#\s]*expired_second\s*:\s*//p" $migrate_prop)
     migrate_dirs=$(echo $migrate_dirs)
     migrate_opts=" -k $keyspace -t $table -m $max_attempt -e $expired_second -c \"'$cron_expression'\" -- $migrate_dirs"
-    echo "$migrate_opts"
 }
 if [ "x$1" == xmigrate ]; then
 quartz_properties=$CASSANDRA_HOME/conf/quartz.properties
 migrate_conf
-migrate_prop=$CASSANDRA_HOME/conf/migrate.properties
-    migrate_dirs=$(sed -n "s/^[^#\s]*migrate_dirs_.*\s*=\s*//p" $migrate_prop)
-    table=$(sed -n "s/^[^#\s]*table\s*=\s*//p" $migrate_prop)
-    keyspace=$(sed -n "s/^[^#\s]*keyspace\s*=\s*//p" $migrate_prop)
-    cron_expression=$(sed -n "s/^[^#\s]*cron_expression\s*=\s*//p" $migrate_prop)
-    max_attempt=$(sed -n "s/^[^#\s]*max_attempt\s*=\s*//p" $migrate_prop)
-    expired_second=$(sed -n "s/^[^#\s]*expired_second\s*=\s*//p" $migrate_prop)
-    migrate_dirs=$(echo $migrate_dirs)
-exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" $JVM_OPTS -Xmx$MAX_HEAP_SIZE \
+exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
         -Dcassandra.storagedir="$cassandra_storagedir" \
         -Dcassandra.logdir="$CASSANDRA_HOME/logs" \
         -Dorg.quartz.properties="$quartz_properties" \
         -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
         cn.ac.iie.drive.Driver $1 -k $keyspace -t $table -m $max_attempt \
             -e $expired_second -c "$cron_expression" $migrate_dirs <&- &
+elif [ "x$1" == xcleanup ]; then
+migrate_conf
+exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
+        -Dcassandra.storagedir="$cassandra_storagedir" \
+        -Dcassandra.logdir="$CASSANDRA_HOME/logs" \
+        -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
+        cn.ac.iie.drive.Driver $1 -k $keyspace -t $table \
+            $migrate_dirs <&- &
 else
 exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" $JVM_OPTS -Xmx$MAX_HEAP_SIZE \
         -Dcassandra.storagedir="$cassandra_storagedir" \
