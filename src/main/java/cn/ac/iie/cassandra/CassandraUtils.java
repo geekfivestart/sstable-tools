@@ -296,6 +296,36 @@ public class CassandraUtils {
                 Directories.OnTxnErr.THROW).forEach(fileList::add));
         return fileList;
     }
+    public static List<File> getSstableFromTime(String keyspaceName, String tableName, @NotNull Long expiredSecond)
+            throws Exception {
+        Long maxEntireMicroSecond = (expiredSecond ) *  million;
+
+        CFMetaData metaData = tableFromName(keyspaceName, tableName);
+        Directories directories = new Directories(metaData, ColumnFamilyStore.getInitialDirectories());
+        List<File> fileList = new ArrayList<>();
+        // 尝试过使用jmx直接从cassandra进程中获取所有ssTable文件，
+        // 虽然该方法可行且更为方便，
+        // 但鉴于目前原生cassandra并不提供该接口，
+        // 若想使用该方法须自行修改cassandra代码添加该接口，
+        // 这样难以保证安全性，因此暂不推荐该方法
+        // 但目前的方法还无法判断ssTable是否在线
+        // 非数据文件暂时不迁移；软连接文件表示已经迁移过，无需再迁移，因此，
+        // 过滤非数据文件及软连接文件
+        directories.getCFDirectories().forEach(dir -> LifecycleTransaction.getFiles(dir.toPath(),
+                (file, fileType) -> {
+                    try {
+                        return fileType == Directories.FileType.FINAL
+                                && file.getName().endsWith("Data.db")
+                                && !Files.isSymbolicLink(file.toPath())
+                                && maxTimestampOfSSTable(file.getAbsolutePath()) <= maxEntireMicroSecond;
+                    } catch (Exception e) {
+                        logger.error(e.getMessage(), e);
+                        return false;
+                    }
+                },
+                Directories.OnTxnErr.THROW).forEach(fileList::add));
+        return fileList;
+    }
 
     /**
      * 获取某个table的合并最大时间窗口
@@ -334,16 +364,18 @@ public class CassandraUtils {
             Map<String, String> params = metaData.params.compaction.options();
             String size;
             String unit;
+            logger.info("params:{}",params.toString());
             if (params.containsKey("compaction_window_size")) {
                 size = params.get("compaction_window_size");
             } else {
-                throw new Exception("Property [compaction_window_size] not exist，please check the schema");
+                size="1";
+                //throw new Exception("Property [compaction_window_size] not exist，please check the schema");
             }
             if(params.containsKey("compaction_window_unit")){
                 unit = params.get("compaction_window_unit");
             } else{
-
-                throw new Exception("Property [compaction_window_unit] not exist，please check the schema");
+                unit="DAYS";
+                //throw new Exception("Property [compaction_window_unit] not exist，please check the schema");
             }
             Long secondDigit;
             switch (unit){

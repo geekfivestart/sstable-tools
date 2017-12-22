@@ -29,6 +29,7 @@ public class CleanupCmd extends ClusterTableCmd{
             System.out.println("迁移目录为空");
             return false;
         }
+        System.out.println(migratePath.toString());
         for (String path : migratePath) {
             File file = new File(path);
             if(!(file.exists() && file.isDirectory() && file.canWrite())){
@@ -48,6 +49,6 @@ public class CleanupCmd extends ClusterTableCmd{
     protected void execute() {
         Options.init(ksName, tbName, 0L, "");
         Options.instance.setMigratePaths(migratePath);
-        MigrateUtils.cleanUpMigrateDirs();
+        //MigrateUtils.cleanUpMigrateDirs();
     }
 }

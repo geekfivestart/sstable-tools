@@ -12,6 +12,7 @@ import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static java.nio.file.StandardCopyOption.ATOMIC_MOVE;
 import static java.nio.file.StandardCopyOption.COPY_ATTRIBUTES;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
@@ -128,6 +129,27 @@ public class FileUtils {
             LOG.error(e.getMessage(), e);
         }
         return copied;
+    }
+
+    /**
+     * move file or directory
+     * @param sourcePath
+     * @param targetPath
+     * @return
+     */
+    public static boolean moveFile(Path sourcePath,Path targetPath){
+        boolean moved=false;
+        try{
+            Files.move(sourcePath,targetPath,REPLACE_EXISTING);
+            moved=true;
+        }catch (IOException ex){
+            LOG.error("IOException encountered during moving,src:{} dst:{}",sourcePath.toString(),targetPath.toString());
+            LOG.error(ex.getMessage(),ex);
+        }catch (Exception e){
+            LOG.error("Exception encountered during moving,src:{} dst:{}",sourcePath.toString(),targetPath.toString());
+            LOG.error(e.getMessage(),e);
+        }
+        return moved;
     }
 
     /**

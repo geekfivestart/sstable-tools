@@ -58,6 +58,10 @@ keyspace=""
 cron_expression=""
 max_attempt=""
 expired_second=""
+newtable=""
+move_since=""
+ip=""
+port=""
 
 function migrate_conf(){
     migrate_prop=$CASSANDRA_HOME/conf/migrate.properties
@@ -67,27 +71,42 @@ function migrate_conf(){
     cron_expression=$(sed -n "s/^[^#\s]*cron_expression\s*:\s*//p" $migrate_prop)
     max_attempt=$(sed -n "s/^[^#\s]*max_attempt\s*:\s*//p" $migrate_prop)
     expired_second=$(sed -n "s/^[^#\s]*expired_second\s*:\s*//p" $migrate_prop)
+    newtable=$(sed -n "s/^[^#\s]*newTable\s*:\s*//p" $migrate_prop)
+    move_since=$(sed -n "s/^[^#\s]*move_since\s*:\s*//p" $migrate_prop)
     migrate_dirs=$(echo $migrate_dirs)
     migrate_opts=" -k $keyspace -t $table -m $max_attempt -e $expired_second -c \"'$cron_expression'\" -- $migrate_dirs"
 }
+migrate_conf
 if [ "x$1" == xmigrate ]; then
 quartz_properties=$CASSANDRA_HOME/conf/quartz.properties
-migrate_conf
 exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
         -Dcassandra.storagedir="$cassandra_storagedir" \
         -Dcassandra.logdir="$CASSANDRA_HOME/logs" \
         -Dorg.quartz.properties="$quartz_properties" \
         -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
-        cn.ac.iie.drive.Driver $1 -k $keyspace -t $table -m $max_attempt \
-            -e $expired_second -c "$cron_expression" $migrate_dirs <&- &
+        cn.ac.iie.drive.Driver $1 $keyspace $table \
+            $move_since $migrate_dirs <&- &
+elif [ "x$1" == xmove ]; then
+exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
+        -Dcassandra.storagedir="$cassandra_storagedir" \
+        -Dcassandra.logdir="$CASSANDRA_HOME/logs" \
+        -Dorg.quartz.properties="$quartz_properties" \
+        -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
+        cn.ac.iie.drive.Driver $1 $keyspace $table $move_since $newtable <&- &
 elif [ "x$1" == xcleanup ]; then
-migrate_conf
 exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
         -Dcassandra.storagedir="$cassandra_storagedir" \
         -Dcassandra.logdir="$CASSANDRA_HOME/logs" \
         -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
-        cn.ac.iie.drive.Driver $1 -k $keyspace -t $table \
+        cn.ac.iie.drive.Driver $1 $keyspace  $table \
             $migrate_dirs <&- &
+elif [ "x$1" == xmoveindex ]; then
+exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
+        -Dcassandra.storagedir="$cassandra_storagedir" \
+        -Dcassandra.logdir="$CASSANDRA_HOME/logs" \
+        -Dorg.quartz.properties="$quartz_properties" \
+        -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
+        cn.ac.iie.drive.Driver $1 $ip $port $keyspace $table $newtable $move_since <&- &
 else
 exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" $JVM_OPTS -Xmx$MAX_HEAP_SIZE \
         -Dcassandra.storagedir="$cassandra_storagedir" \

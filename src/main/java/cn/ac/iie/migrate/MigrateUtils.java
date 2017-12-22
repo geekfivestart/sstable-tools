@@ -5,9 +5,6 @@ import cn.ac.iie.cassandra.NoSuchKeyspaceException;
 import cn.ac.iie.cassandra.NoSuchTableException;
 import cn.ac.iie.drive.Options;
 import cn.ac.iie.sstable.SSTableUtils;
-import cn.ac.iie.task.CleanupTask;
-import cn.ac.iie.task.DoMigrateTask;
-import cn.ac.iie.task.MigrateTask;
 import cn.ac.iie.utils.FileUtils;
 import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
@@ -28,7 +25,6 @@ import java.util.concurrent.TimeUnit;
 import static cn.ac.iie.utils.FileUtils.*;
 import org.quartz.JobBuilder;
 import org.quartz.TriggerBuilder;
-import sun.reflect.annotation.ExceptionProxy;
 
 /**
  * 文件迁移工具类
@@ -57,144 +53,65 @@ public class MigrateUtils {
     private static final String MAIN_MIGRATE_TRIGGER = "main.migrate.trigger";
     private static Scheduler scheduler;
 
-    /**
-     * 设置冷数据迁移主任务，并开始执行<br/>
-     * 主任务的作用主要是获取需要迁移的所有ssTable<br/>
-     * 并开启针对单个ssTable的迁移子任务
-     */
-    public static void startMigrate(){
-        LOG.info("Cold migration is arranged，cront exp：{}", Options.instance.cronExpression);
-        int diskCount = Options.instance.migrateDirectories.dirCount();
-        try {
-            Properties p = new Properties();
-            // 设置线程池中暑为目标目录数
-            // 原因是使并行任务不会超过目标目录个数
-            // 事实上，由于目前目录获取机制，当并行任务数大于目标目录个数时
-            // 有可能造成某些任务（极有可能是超过目标目录数之后的任务）执行失败，
-            // 从而造成不必要的重试次数的增加
-            p.setProperty("org.quartz.threadPool.threadCount", diskCount+"");
-            p.setProperty("org.quartz.threadPool.class", "org.quartz.simpl.SimpleThreadPool");
-            SchedulerFactory factory = new StdSchedulerFactory(p);
-            scheduler = factory.getScheduler();
 
-            // 创建主任务，该任务主要负责创建ssTable迁移子任务
-            // 所有迁移操作实际上均在迁移子任务中执行
-            JobDetail job = JobBuilder.newJob(MigrateTask.class)
-                    .withIdentity(MAIN_MIGRATE_JOB, MIGRATE_JOB)
-                    .withDescription("冷数据迁移任务")
-                    .build();
-            CronTrigger trigger = TriggerBuilder.newTrigger()
-                    .withIdentity(MAIN_MIGRATE_TRIGGER, MIGRATE_TRIGGER)
-                    .withSchedule(CronScheduleBuilder.cronSchedule(Options.instance.cronExpression))
-                    .build();
-            Date startTime = scheduler.scheduleJob(job, trigger);
-            LOG.info("Migration task will be started on {}", DATE_FORMAT.format(startTime));
-            scheduler.start();
-//            startCleanupTask();
-//            while (true){
-//                if(scheduler.getTriggerState(
-//                        new TriggerKey(MAIN_MIGRATE_TRIGGER,
-//                                MIGRATE_TRIGGER))
-//                        == Trigger.TriggerState.COMPLETE){
-//                    break;
-//                }
-//                Thread.sleep(5000);
-//            }
-        } catch (Exception e) {
-            LOG.error(e.getMessage(), e);
-            LOG.error("Data Migration Exception");
-            System.exit(-1);
+    public static void starMigrateMission(String ks,String table,long moveSince,List<String> destPath) throws Exception {
+        if(ks==null||ks.equals("")){
+            System.out.println("keyspace is null or empty");
+            return;
         }
+        if(table==null||table.equals("")){
+            System.out.println("table is null or empty");
+            return;
+        }
+        if(moveSince<0){
+            System.out.println("moveSince should be positive number");
+            return;
+        }
+        if(destPath.size()<=0){
+            System.out.println("destPath should not be empty");
+            return;
+        }
+        long st=System.currentTimeMillis();
+        List<File> fileList=CassandraUtils.getSstableFromTime(ks,table,moveSince);
+        final byte [] lock=new byte[0];
+        MigrateDirectories migrateDirectories=new MigrateDirectories();
+        migrateDirectories.addAllString(destPath);
+
+        Thread [] thread =new Thread[destPath.size()];
+        for(int i=0;i<thread.length;++i){
+            thread[i]=new Thread(){
+                @Override
+               public void run(){
+                    while(true){
+                        File file=null;
+                        synchronized (lock){
+                            if(fileList.size()>0){
+                                file=fileList.remove(0);
+                            }else{
+                                break;
+                            }
+                        }
+                        long sst=System.currentTimeMillis();
+                        doMigrate(file,migrateDirectories);
+                        LOG.info("{} has been migrated successfully, time consumer:{}ms",
+                                file,System.currentTimeMillis()-sst);
+                    }
+               }
+            };
+            thread[i].start();
+        }
+
+        for(Thread t:thread)
+            t.join();
+        LOG.info("migration finished,time consume:{}s",(System.currentTimeMillis()-st)/1000);
     }
 
-    /**
-     * 执行冷数据迁移<br/>
-     * 首先获取相关表的所有待迁移sstable文件<br/>
-     * 然后对各个sstable文件创建迁移任务并开始执行
-     */
-    public static void startDoMigrateTask(){
-        try {
-            int existsTaskCount = scheduler.getJobKeys(GroupMatcher.groupContains(DO_MIGRATE_JOB)).size();
-            if(existsTaskCount > 0){
-                LOG.warn("{} task(s) running， try next time", existsTaskCount);
-                return;
-            }
-            List<File> files = CassandraUtils.expiredSSTableFromName(
-                    Options.instance.ksName,
-                    Options.instance.tbName,
-                    Options.instance.expiredSecond);
-
-            files.forEach(file-> {
-                try {
-                    long maxtime = CassandraUtils.maxTimestampOfSSTable(file.getAbsolutePath());
-                    LOG.info("{} {}({})", file.getAbsolutePath(),maxtime, SSTableUtils.toDateString(maxtime,
-                            TimeUnit.MICROSECONDS, false));
-                }catch(Exception ex){
-                }
-            });
-            LOG.info("{} file(s) to be migrated", files.size());
-            // 对每个文件创建迁移任务，并在5秒钟后开始执行
-            files.forEach(file -> startDoMigrateTask(file, 0, 5));
-
-        } catch (Exception e) {
-            LOG.error(e.getMessage(), e);
-
-            System.exit(-1);
-        }
-    }
-
-    /**
-     * 对一个ssTable文件创建迁移任务
-     * @param ssTable ssTable文件
-     * @param attempt 标识该任务为第几次执行
-     * @param delaySecond 延迟秒数，标识该任务将延迟多少秒后执行
-     */
-    private static void startDoMigrateTask(File ssTable, final int attempt, int delaySecond){
-        Date startTime;
-        // 调用DateBuilder获取延迟后的时间；
-        // 默认延迟为5秒
-        // 此处设置延迟主要是为了确保任务能够按预定延迟时间创建并执行，
-        // 若任务时间设置为当前执行，则任务可能无法执行，因此默认延迟设置为5秒
-        startTime = DateBuilder.futureDate(
-                delaySecond > 5? delaySecond: 5,
-                DateBuilder.IntervalUnit.SECOND);
-        String jobName = ssTable.getName()+".NO."+attempt;
-        JobDetail job = JobBuilder.newJob(DoMigrateTask.class)
-                .withIdentity(jobName + MIGRATE_JOB_SUFFIX, DO_MIGRATE_JOB)
-                .withDescription("冷数据迁移任务")
-                .build();
-        // 执行任务过程中需要知道ssTable文件以确定ssTable位置；
-        // 知道尝试次数以便任务失败后判断是否重新执行
-        job.getJobDataMap().put("sstable", ssTable);
-        job.getJobDataMap().put("attempt", attempt);
-        // 由于该任务不是定时任务，因此只需要设置一个
-        // 简单触发器在到达延迟时间时刻执行一次即可
-        SimpleTrigger trigger = (SimpleTrigger) TriggerBuilder.newTrigger()
-                .withIdentity(jobName + MIGRATE_TRIGGER_SUFFIX, DO_MIGRATE_TRIGGER)
-                .startAt(startTime)
-                .build();
-
-        try {
-            startTime = scheduler.scheduleJob(job, trigger);
-            LOG.info("Migration of sstable（{}）will be started on {} for the {}nd/th time",
-
-                    ssTable.getName(),
-                    DATE_FORMAT.format(startTime),
-                    attempt+1);
-        } catch (SchedulerException e) {
-            LOG.error(e.getMessage(), e);
-            // 若任务执行出现异常，则有可能系统出现问题，
-            // 因此，此处暂时选择退出程序
-            System.exit(-1);
-        }
-    }
 
     /**
      * 对sstable文件进行迁移
      * @param file sstable文件
-     * @param attempt 尝试次数
      */
-    public static boolean doMigrate(File file, final int attempt){
+    public static boolean doMigrate(File file,MigrateDirectories migrateDirectories){
         List<File> failedFiles = Lists.newArrayList();
         String fileName = file.getName();
 //                String parentPath = file.getParentFile().getAbsolutePath();
@@ -202,7 +119,7 @@ public class MigrateUtils {
         boolean migrated;
         try {
             // 从待选迁移目标目录中选择一个剩余空间最大的目录作为迁移目标目录
-            directory = Options.instance.migrateDirectories.poll(0, 10);
+            directory = migrateDirectories.poll(0, 10);
         } catch (InterruptedException e) {
             LOG.error(e.getMessage(), e);
 //                System.exit(-1);
@@ -230,20 +147,9 @@ public class MigrateUtils {
             // 重新将迁移目录放回,
             // 先取出再放回的原因是迁移过后数据目录磁盘空间会发生变化，
             // 因此该迁移目录的排序位置可能发生变化
-            Options.instance.migrateDirectories.add(directory);
+            migrateDirectories.add(directory);
         }
-        // 若有文件迁移失败，则重新对文件进行迁移，
-        // 新的任务将在5分钟以后执行
-        // 若尝试次数超过最大尝试次数，则不再进行重试
-        if(!migrated){
-            if(attempt >= Options.instance.maxMigrateAttemptTimes){
-                LOG.error("Migration task run {} times, still not success",
-                        Options.instance.maxMigrateAttemptTimes);
-                LOG.error("Migration task run %s times, still not success", failedFiles.toString());
-            } else {
-                startDoMigrateTask(file, attempt + 1, 300);
-            }
-        }
+
         return migrated;
     }
 
@@ -416,25 +322,6 @@ public class MigrateUtils {
         return StringUtils.join(s, File.separator);
     }
 
-    private static void startCleanupTask(){
-        JobDetail job = JobBuilder.newJob(CleanupTask.class)
-                .withIdentity(DO_CLEANUP_JOB, CLEANUP_JOB)
-                .withDescription("废弃ssTable清理任务")
-                .build();
-        CronTrigger trigger = TriggerBuilder.newTrigger()
-                .withIdentity(DO_CLEANUP_TRIGGER, CLEANUP_TRIGGER)
-                .withSchedule(CronScheduleBuilder.cronSchedule(DEFAULT_CRON_EXP))
-                .build();
-        Date startTime;
-        try {
-            startTime = scheduler.scheduleJob(job, trigger);
-            LOG.info("The task of cleanning discard ssTable will be started at {}",
-                    DATE_FORMAT.format(startTime));
-        } catch (SchedulerException e) {
-            LOG.error(e.getMessage(), e);
-        }
-    }
-
     /**
      * 清理迁移目录，删除无用ssTable文件<br/>
      * 由于cassandra执行compact、删除或数据过期等原因，
@@ -443,20 +330,40 @@ public class MigrateUtils {
      * 从而产生废弃ssTable文件。<br/>
      * 因此，需要执行清理操作以删除废弃ssTable文件
      */
-    public static void cleanUpMigrateDirs(){
+    public static void cleanUpMigrateDirs(String ks,String table,List<String> list){
+        if(list == null) {
+            System.out.println("迁移目录为空");
+            return;
+        }
+        for (String path : list) {
+            File file = new File(path);
+            if(!(file.exists() && file.isDirectory() && file.canWrite())){
+                System.out.println(String.format("文件夹%s 不存在或无写入权限", path));
+                return ;
+            }
+        }
+        if(ks==null||ks.equals("")){
+            System.out.println("keyspace is null or empty");
+            return;
+        }
+        if(table==null||table.equals("")){
+            System.out.println("table is null or empty");
+            return;
+        }
+
         final String tblId;
         List<File> ssTableList;
         try {
             //获取某个表的uuid用于构造相应的目录路径
-            tblId = CassandraUtils.getTableUid(Options.instance.ksName, Options.instance.tbName);
+            tblId = CassandraUtils.getTableUid(ks,table);
             //获取当前所有的ssTable文件用于检测迁移目录下的文件是否已被删除
-            ssTableList = CassandraUtils.ssTableFromName(Options.instance.ksName, Options.instance.tbName, true);
+            ssTableList = CassandraUtils.ssTableFromName(ks,table, true);
             LOG.info("All sstable num:{}",ssTableList.size());
         } catch (NoSuchKeyspaceException | NoSuchTableException e) {
             LOG.error(e.getMessage(), e);
             return;
         }
-        Set<String> migrateDirs = new HashSet<>(Options.instance.migrateDirectories.getAllDir());
+        Set<String> migrateDirs = new HashSet<>(list);
         Map<String, File> migratedSsTableFileMap = new HashMap<>();
         /*
         获取迁移目录中相关表目录下的所有ssTable数据文件
@@ -467,7 +374,7 @@ public class MigrateUtils {
          */
         LOG.info("dir:{}",migrateDirs);
         migrateDirs.forEach(dir -> {
-            String migratePath = join(dir, Options.instance.ksName, tblId);
+            String migratePath = join(dir, ks, tblId);
             LOG.info("migratePath:{}",migratePath);
             File migrateDir = new File(migratePath);
             if(migrateDir.exists() && migrateDir.isDirectory()){
