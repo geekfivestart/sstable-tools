@@ -385,8 +385,8 @@ public class SSTableUtils {
                 out.printf("%sEncodingStats minTimestamp%s:%s %s %s%n", c, s, r, encodingStats.minTimestamp, toDateString(encodingStats.minTimestamp, TimeUnit.MICROSECONDS, color));
                 out.printf("%sKeyType%s:%s %s%n", c, s, r, keyType.toString());
                 out.printf("%sClusteringTypes%s:%s %s%n", c, s, r, clusteringTypes.toString());
-                out.printf("%sStaticColumns%s:%s {%s}%n", c, s, r, FBUtilities.toString(statics));
-                out.printf("%sRegularColumns%s:%s {%s}%n", c, s, r, FBUtilities.toString(regulars));
+                out.printf("%sStaticColumns%s:%s {%s}%n", c, s, r, FBUtilities.toString(statics).replace(",",",\n"));
+                out.printf("%sRegularColumns%s:%s {%s}%n", c, s, r, FBUtilities.toString(regulars).replace(",",",\n"));
             }
         }
     }
