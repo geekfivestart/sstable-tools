@@ -108,7 +108,7 @@ exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
         -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
         cn.ac.iie.drive.Driver $1 $ip $port $keyspace $table $newtable $move_since <&- &
 else
-exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" $JVM_OPTS -Xmx$MAX_HEAP_SIZE \
+exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
         -Dcassandra.storagedir="$cassandra_storagedir" \
         -Dcassandra.logdir="$CASSANDRA_HOME/logs" \
         -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \

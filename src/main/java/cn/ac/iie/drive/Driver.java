@@ -76,8 +76,7 @@ public class Driver {
                 SSTableCmd.class,
                 DescribeCmd.class,
                 TimestampCmd.class,
-                RestoreCmd.class,
-                CleanupCmd.class
+                RestoreCmd.class
         );
         Cli.CliBuilder<Runnable> builder = Cli.builder("sstable-tools");
 

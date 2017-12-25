@@ -9,7 +9,8 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 
 ## 一、使用方法
 
-    sstable-tools [ move | moveindex | migrate | cleanup ]
+    sstable-tools [ move | moveindex | migrate | cleanup |
+    describe -f file | timestamp -f file | sstable [-i] -k ksname -t table ]
 
 ### 1.1 过期数据分离
     sstable-tools move
@@ -66,6 +67,127 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 |keyspace|表的 keyspace|
 |table|表名|
 |migrate_dirs|放置冷数据的目录，每行一个目录，可配置多个|
+
+### 1.5 显示 sstable 文件的元数据
+    sstable-tools describe -f file
+    其中 file 为要显示的 sstable 文件
+示例输出
+```
+/Users/clohfink/git/sstable-tools/ma-119-big-Data.db
+====================================================
+Partitions: 32162                                                               
+Rows: 32162
+Tombstones: 0
+Cells: 353782
+Widest Partitions:
+   [7339364] 1
+   [7153250] 1
+   [7216142] 1
+   [7043886] 1
+   [7687007] 1
+Largest Partitions:
+   [7445112] 3418 (3.4 kB)
+   [7015610] 3278 (3.3 kB)
+   [7290631] 3109 (3.1 kB)
+   [7043285] 2808 (2.8 kB)
+   [7728519] 2788 (2.8 kB)
+Tombstone Leaders:
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.010000
+Size: 30920990 (30.9 MB)
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+  Compression ratio: 0.6600443582175085
+Minimum timestamp: 1474892678232006 (2016-09-26 20:24:38)
+Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
+SSTable min local deletion time: 2147483647 (2038-01-19 11:14:07)
+SSTable max local deletion time: 2147483647 (2038-01-19 11:14:07)
+TTL min: 0 (0 milliseconds)
+TTL max: 0 (0 milliseconds)
+minClustringValues: []
+maxClustringValues: []
+Estimated droppable tombstones: 0.0
+SSTable Level: 0
+Repaired at: 0 (1970-01-01 08:00:00)
+  Lower bound: ReplayPosition(segmentId=1474890699224, position=4007)
+  Upper bound: ReplayPosition(segmentId=1474890699229, position=29647053)
+totalColumnsSet: 353782
+totalRows: 32162
+Estimated tombstone drop times:
+  Value                            | Count    %   Histogram
+  2147483647 (2038-01-19 11:14:07) | 385944 (100) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉
+Estimated partition size:
+  Value | Count   %   Histogram
+  179   |     1 (  0)  
+  215   |     6 (  0)  
+  258   |    66 (  0) ▎
+  310   |   260 (  0) ▉▎
+  372   |   713 (  2) ▉▉▉▋
+  446   |  1562 (  4) ▉▉▉▉▉▉▉▉
+  535   |  2246 (  6) ▉▉▉▉▉▉▉▉▉▉▉▍
+  642   |  2902 (  9) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▊
+  770   |  3470 ( 10) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▊
+  924   |  4100 ( 12) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉
+  1109  |  4929 ( 15) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▏
+  1331  |  5861 ( 18) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉
+  1597  |  4971 ( 15) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▍
+  1916  |  1021 (  3) ▉▉▉▉▉▏
+  2299  |    44 (  0) ▏
+  2759  |     7 (  0)  
+  3311  |     3 (  0)  
+Estimated column count:
+  Value | Count   %   Histogram
+  12    | 32162 (100) ▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉
+Estimated cardinality: 32002
+EncodingStats minTTL: 0 (0 milliseconds)
+EncodingStats minLocalDeletionTime: 1442880000 (1970-01-18 00:48:00)
+EncodingStats minTimestamp: 1474892678228003 (2016-09-26 20:24:38)
+KeyType: org.apache.cassandra.db.marshal.LongType
+ClusteringTypes: []
+StaticColumns: {}
+RegularColumns: {
+    f6:org.apache.cassandra.db.marshal.UTF8Type,
+    f7:org.apache.cassandra.db.marshal.UTF8Type,
+    f8:org.apache.cassandra.db.marshal.UTF8Type,
+    f9:org.apache.cassandra.db.marshal.UTF8Type,
+    f10:org.apache.cassandra.db.marshal.UTF8Type,
+    f11:org.apache.cassandra.db.marshal.UTF8Type,
+    f1:org.apache.cassandra.db.marshal.UTF8Type,
+    f2:org.apache.cassandra.db.marshal.UTF8Type,
+    f3:org.apache.cassandra.db.marshal.UTF8Type,
+    f4:org.apache.cassandra.db.marshal.UTF8Type,
+    f5:org.apache.cassandra.db.marshal.UTF8Type
+}
+```
+### 1.6 显示 sstable 中数据的时间戳范围
+    sstable-tools timestamp -f file
+    其中 file 为 sstable 文件
+  示例输出
+  ```
+/data06/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-60-big-Data.db
+=====================================================================================
+Minimum timestamp: 1474892678232006 (2016-09-26 20:24:38)
+Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
+  ```
+
+### 1.7 显示表在当前节点上的所有 sstable 文件信息
+    sstable-tools sstable [-i] -k ksname -t table
+    其中，-i 表示是否显示由符号链接指示的sstable, ksname 为待显示表的 keyspace, table 为待显示表名
+
+示例输出
+```
+是否包含软连接：true
+ SSTables for keyspace: test, table: resume
+===========================================
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-1-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-13-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-19-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-37-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-43-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-49-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-55-big-Data.db isSymbolicLink:true
+/data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-7-big-Data.db isSymbolicLink:true
+--finished--
+```
 
 ## 二、项目开发及构建
 本项目在jdk1.8 + IntelliJ环境下开发，使用[Apache Maven](https://maven.apache.org/)进行构建管理。
