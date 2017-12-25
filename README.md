@@ -6,6 +6,9 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 * 过期索引分离 (moveindex)
 * 冷数据迁移 (migrate)
 * 无效冷数据删除 (cleanup)
+* 显示sstable文件元数据
+* 显示sstable中数据的时间戳范围
+* 显示表在当前节点上的所有sstable文件
 
 ## 一、使用方法
 
@@ -169,7 +172,7 @@ Minimum timestamp: 1474892678232006 (2016-09-26 20:24:38)
 Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
   ```
 
-### 1.7 显示表在当前节点上的所有 sstable 文件信息
+### 1.7 显示表在当前节点上的所有 sstable 文件
     sstable-tools sstable [-i] -k ksname -t table
     其中，-i 表示是否显示由符号链接指示的sstable, ksname 为待显示表的 keyspace, table 为待显示表名
 
