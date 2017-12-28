@@ -224,9 +224,9 @@ migrate.properties为包含程序执行所需参数的配置文件， logback-ss
 
 
     keyspace: new_wb
-    table:tp_msg_microblog_v2
+    table:t1
     move_since:1505347199
-    newTable:tp_msg_microblog_v2
+    newTable:t2
     migrate_dirs: /mpp-data/cold/data00
     migrate_dirs: /mpp-data/cold/data01
     migrate_dirs: /mpp-data/cold/data02
