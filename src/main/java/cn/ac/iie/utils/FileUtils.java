@@ -131,6 +131,22 @@ public class FileUtils {
         return copied;
     }
 
+     public static boolean copyFileLessInfo(Path sourcePath, Path targetPath){
+        boolean copied = false;
+        try {
+            // 将源文件移动至目标文件，同时需要拷贝文件属性
+            Files.copy(sourcePath, targetPath, REPLACE_EXISTING, COPY_ATTRIBUTES);
+            copied = true;
+        } catch (IOException e) {
+            LOG.error("IOException encountered during file copy, src:{},dst:{}", sourcePath.toString(), targetPath.toString());
+            LOG.error(e.getMessage(), e);
+        } catch (Exception e) {
+            LOG.error("Exception encountered during file copy, src:{},dst:{}", sourcePath.toString(), targetPath.toString());
+            LOG.error(e.getMessage(), e);
+        }
+        return copied;
+    }
+
     /**
      * move file or directory
      * @param sourcePath

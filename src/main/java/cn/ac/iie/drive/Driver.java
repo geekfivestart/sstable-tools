@@ -63,6 +63,19 @@ public class Driver {
                     "move_since:\t以秒为单位的时间戳，即对包含数据的最大时间戳小于move_since的sstable进行分离\n"+
                     Strings.repeat(" ","migrate".length()+2)+
                     "migrate_dirs:\t放置冷数据的目录，每行一个目录，可配置多个\n");
+            put("migrateindex","  用于将冷索引(一定时间段之前的索引)从原始目录移动到新目录，并在建立符号链接指向新目录，这样便\n"+
+                    Strings.repeat(" ","migrate".length()+2)+
+                    "可实现将新索引放置在高速磁盘上(如SSD)，冷索引放置到低速磁盘(如机械硬盘)上的目的。 执行此命令前，务必停止运行\n"+
+                    Strings.repeat(" ","migrate".length()+2)+
+                    " mpp-engine 服务，即 nodetool drain && pkill -9 impalad。 此功能需要在配置文件中配置如下参数。\n"+
+                    Strings.repeat(" ","migrate".length()+2)+
+                    "keyspace:\t待进行数据迁移表的 keyspace\n"+
+                    Strings.repeat(" ","migrate".length()+2)+
+                    "table:\t待进行数据迁移表名\n"+
+                    Strings.repeat(" ","migrate".length()+2)+
+                    "move_since:\t以秒为单位的时间戳，即对包含数据的最大时间戳小于move_since的sstable进行分离\n"+
+                    Strings.repeat(" ","migrate".length()+2)+
+                    "migrate_index_dirs:\t放置冷索引的目录，每行一个目录，可配置多个\n");
             put("cleanup","  cassandra运行过程中，在进行compaction进会删除原有的数据文件，生成新的数据文件。若数据文件已经被 迁移到\n"+
                     Strings.repeat(" ","cleanup".length()+2)+
                     "冷数据目录后，在compaction时间仅会删除指向冷数据目录的符号链接，并不会删除冷数据，进而产生无用的 数据文件。因此需\n"+
@@ -83,7 +96,7 @@ public class Driver {
     };
     public static void printHelpInfo(){
         StringBuilder sb=new StringBuilder();
-        sb.append("sstable-tools [ move | moveindex | migrate | cleanup | " +
+        sb.append("sstable-tools [ move | moveindex | migrate | migrateindex | cleanup | " +
                 "describe -f file | timestamp -f file | sstable [-i] -k ksname -t table ]\n");
         sb.append("\t");
         sb.append("move       过期数据分离\n");
@@ -124,7 +137,7 @@ public class Driver {
             }
             return;
         }else if(args.length>0 && args[0].equals("move")){
-            MoveUtils.startDoMigrateTask(args[1],args[2],Long.parseLong(args[3]),args[4]);
+            MoveUtils.moveCassandraData(args[1],args[2],Long.parseLong(args[3]),args[4]);
             return;
         }else if(args.length>0 && args[0].equals("moveindex")){
             InetAddress localAddress = null;
@@ -156,6 +169,31 @@ public class Driver {
                 e.printStackTrace();
                 LOG.error(e.getMessage(),e);
             }
+            return;
+        }else if(args.length>0 && args[0].equals("migrateindex")){
+            if(args.length<7){
+                System.out.println("Missing parameters!, at least 7 parameters are expected!");
+                return;
+            }
+            String ip=args[1];
+            int port=Integer.parseInt(args[2]);
+            String ks=args[3];
+            String table=args[4];
+            long moveSince=Long.parseLong(args[5]);
+            List<String> list=Lists.newArrayList();
+            for(int i=6;i<args.length;++i){
+                list.add(args[i]);
+            }
+
+            InetAddress localAddress = null;
+            try {
+                localAddress = InetAddress.getLocalHost();
+            } catch (UnknownHostException e) {
+                LOG.error(e.getMessage(),e);
+                return;
+            }
+            String hostip= localAddress.getHostAddress();
+            MigrateUtils.migrateIndex(ip,port,hostip,ks,table,moveSince,list);
             return;
         }else if(args.length>0 && args[0].equals("cleanup")){
             if(args.length<4){

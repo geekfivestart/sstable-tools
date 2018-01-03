@@ -51,7 +51,17 @@ public class MoveUtils {
     public  static final String COL_MAX_ADD_RANGE                = "max_ar";
     public  static final String COL_IS_PRIMARY                   = "pm";
 
-    public static void startDoMigrateTask(String ksName,String tbName,long expiredSecond,
+    /*
+     */
+
+    /**
+     * move c* data of tbName to newTable
+     * @param ksName
+     * @param tbName
+     * @param expiredSecond
+     * @param newTable
+     */
+    public static void moveCassandraData(String ksName,String tbName,long expiredSecond,
                                           String newTable){
         try {
             List<File> files = CassandraUtils.getSstableFromTime(
@@ -99,7 +109,7 @@ public class MoveUtils {
         }
     }
 
-    public static void moveIndex(String ip,int port,String host,String ks, String oriTable, String newTable, long expireTimeInSeconds){
+    public static void moveIndex(String ip,int port,String host,String ks, String oriTable, String newTable, long moveSince){
         String query = "select * from mpp_schema.mpp_index " + "where ks='" + ks
                 + "' and tb='" + oriTable + "' and hn='" + host + "' allow filtering ;";
         LOG.info("QueryOrder:{}", query);
@@ -108,7 +118,7 @@ public class MoveUtils {
         Iterator<Row> rows = cassandra.queryResult(query);
         // connect cassandra database
         int i = 0;
-        LOG.info("expireTimeInSeconds:{}",expireTimeInSeconds);
+        LOG.info("moveSince:{}", moveSince);
         String insertCql= String.format("insert into (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ",
                 COL_HOSTNAME,COL_KEYSPACE,COL_TABLE,COL_UUID,COL_PATH,
                 COL_MIN_RANGE,COL_MAX_RANGE,COL_TOKEN,COL_FULL_PATH,COL_SHARD_ID,
@@ -136,7 +146,7 @@ public class MoveUtils {
                         continue;
                     }
 
-                    if (maxPartTime <= expireTimeInSeconds) {
+                    if (maxPartTime <= moveSince) {
                         LOG.info("{} {}", maxPartTime, fpath);
                         IndexMeta meta = new IndexMeta();
 

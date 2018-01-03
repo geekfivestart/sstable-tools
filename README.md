@@ -5,6 +5,7 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 * 过期数据分离 (move)
 * 过期索引分离 (moveindex)
 * 冷数据迁移 (migrate)
+* 冷索引迁移 (migrateindex)
 * 无效冷数据删除 (cleanup)
 * 显示sstable文件元数据
 * 显示sstable中数据的时间戳范围
@@ -12,7 +13,7 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 
 ## 一、使用方法
 
-    sstable-tools [ move | moveindex | migrate | cleanup |
+    sstable-tools [ move | moveindex | migrate | migrateindex | cleanup |
     describe -f file | timestamp -f file | sstable [-i] -k ksname -t table ]
 
 ### 1.1 过期数据分离
@@ -57,7 +58,21 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 |move_since|以秒为单位的时间戳，即对包含数据的最大<br>时间戳小于move_since的sstable进行迁移|
 |migrate_dirs|放置冷数据的目录，每行一个目录，可配置多个|
 
-### 1.4 无效冷数据删除
+### 1.4 冷索引迁移
+    sstable-tools migrateindex
+
+用于将冷索引(一定时间段之前的索引)从原始目录移动到新目录，并建立符号链接指向新目录，这样便可实现将新索引放置在高速磁盘上(如SSD)，冷索引放置到低速磁盘(如机械硬盘)上的目的。
+执行此命令前，<font color=red>务必停止运行 mpp-engine 服务，即 nodetool drain && pkill -9 impalad。</font>
+此功能需要在配置文件中配置如下参数。
+
+| 参数名|含义|
+|:----------:|:-------:|
+|keyspace|待进行数据迁移表的 keyspace|
+|table|待进行数据迁移表名|
+|move_since|以秒为单位的时间戳，即对包含数据的最大<br>时间戳小于move_since的索引文件进行迁移|
+|migrate_index_dirs|放置冷数据的目录，每行一个目录，可配置多个|
+
+### 1.5 无效冷数据删除
     sstable-tools cleanup
   cassandra运行过程中，在进行compaction进会删除原有的数据文件，生成新的数据文件。若数据文件已经被
   迁移到冷数据目录后，在compaction时间仅会删除指向冷数据目录的符号链接，并不会删除冷数据，进而产生无用的
@@ -71,7 +86,7 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 |table|表名|
 |migrate_dirs|放置冷数据的目录，每行一个目录，可配置多个|
 
-### 1.5 显示 sstable 文件的元数据
+### 1.6 显示 sstable 文件的元数据
     sstable-tools describe -f file
     其中 file 为要显示的 sstable 文件
 示例输出
@@ -161,7 +176,7 @@ RegularColumns: {
     f5:org.apache.cassandra.db.marshal.UTF8Type
 }
 ```
-### 1.6 显示 sstable 中数据的时间戳范围
+### 1.7 显示 sstable 中数据的时间戳范围
     sstable-tools timestamp -f file
     其中 file 为 sstable 文件
   示例输出
@@ -172,7 +187,7 @@ Minimum timestamp: 1474892678232006 (2016-09-26 20:24:38)
 Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
   ```
 
-### 1.7 显示表在当前节点上的所有 sstable 文件
+### 1.8 显示表在当前节点上的所有 sstable 文件
     sstable-tools sstable [-i] -k ksname -t table
     其中，-i 表示是否显示由符号链接指示的sstable, ksname 为待显示表的 keyspace, table 为待显示表名
 

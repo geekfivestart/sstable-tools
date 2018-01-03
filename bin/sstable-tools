@@ -53,6 +53,7 @@ if [ "x$MAX_HEAP_SIZE" = "x" ]; then
     MAX_HEAP_SIZE="1G"
 fi
 migrate_dirs=""
+migrate_index_dirs=""
 table=""
 keyspace=""
 cron_expression=""
@@ -66,6 +67,7 @@ port=""
 function migrate_conf(){
     migrate_prop=$CASSANDRA_HOME/conf/migrate.properties
     migrate_dirs=$(sed -n "s/^[^#\s]*migrate_dirs\s*:\s*//p" $migrate_prop)
+    migrate_index_dirs=$(sed -n "s/^[^#\s]*migrate_index_dirs\s*:\s*//p" $migrate_prop)
     table=$(sed -n "s/^[^#\s]*table\s*:\s*//p" $migrate_prop)
     keyspace=$(sed -n "s/^[^#\s]*keyspace\s*:\s*//p" $migrate_prop)
     cron_expression=$(sed -n "s/^[^#\s]*cron_expression\s*:\s*//p" $migrate_prop)
@@ -74,6 +76,7 @@ function migrate_conf(){
     newtable=$(sed -n "s/^[^#\s]*newTable\s*:\s*//p" $migrate_prop)
     move_since=$(sed -n "s/^[^#\s]*move_since\s*:\s*//p" $migrate_prop)
     migrate_dirs=$(echo $migrate_dirs)
+    migrate_index_dirs=$(echo $migrate_index_dirs)
     migrate_opts=" -k $keyspace -t $table -m $max_attempt -e $expired_second -c \"'$cron_expression'\" -- $migrate_dirs"
 }
 migrate_conf
@@ -86,6 +89,13 @@ exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
         -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
         cn.ac.iie.drive.Driver $1 $keyspace $table \
             $move_since $migrate_dirs <&- &
+elif [ "x$1" == xmigrateindex ]; then
+exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
+        -Dcassandra.storagedir="$cassandra_storagedir" \
+        -Dcassandra.logdir="$CASSANDRA_HOME/logs" \
+        -Dorg.quartz.properties="$quartz_properties" \
+        -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
+        cn.ac.iie.drive.Driver $1 $ip $port $keyspace $table $move_since $migrate_index_dirs <&- &
 elif [ "x$1" == xmove ]; then
 exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
         -Dcassandra.storagedir="$cassandra_storagedir" \

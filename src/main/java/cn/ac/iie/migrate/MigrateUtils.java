@@ -5,8 +5,11 @@ import cn.ac.iie.cassandra.NoSuchKeyspaceException;
 import cn.ac.iie.cassandra.NoSuchTableException;
 import cn.ac.iie.drive.Options;
 import cn.ac.iie.sstable.SSTableUtils;
+import cn.ac.iie.utils.CassandraClient;
 import cn.ac.iie.utils.FileUtils;
+import com.datastax.driver.core.Row;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import org.apache.commons.lang3.StringUtils;
 import org.quartz.*;
 import org.quartz.impl.StdSchedulerFactory;
@@ -416,4 +419,151 @@ public class MigrateUtils {
             });
     }
 
+    public static void migrateIndex(String ip,int port,String host,String ks,String table, long moveSince,List<String> destPath){
+        if(ip==null||ip.equals("")){
+            System.out.println("ip of Catalog is null or empty");
+            return;
+        }
+        if(host==null||host.equals("")){
+            System.out.println("host is null or empty");
+            return;
+        }
+        if(ks==null||ks.equals("")){
+            System.out.println("keyspace is null or empty");
+            return;
+        }
+        if(table==null||table.equals("")){
+            System.out.println("table is null or empty");
+            return;
+        }
+        if(moveSince<0){
+            System.out.println("moveSince should be positive number");
+            return;
+        }
+        if(destPath.size()<=0){
+            System.out.println("destPath should not be empty");
+            return;
+        }
+
+        String query = "select * from mpp_schema.mpp_index " + "where ks='" + ks
+                + "' and tb='" + table + "' and hn='" + host + "' allow filtering ;";
+        LOG.info("QueryOrder:{}", query);
+        CassandraClient cassandra = new CassandraClient(ip, port, "cassandra", "cassandra");
+        cassandra.ConnectCassandra();
+        Iterator<Row> rows = cassandra.queryResult(query);
+        // connect cassandra database
+        LOG.info("moveSince:{}", moveSince);
+
+        try{
+            List<String> list=Lists.newArrayList();
+            Map<String,String> map= Maps.newHashMap();
+            while(rows.hasNext()){
+                Row row=rows.next();
+                String fpath=row.getString("fpath");
+                long maxPartTime=row.getLong("max_pr");
+                if(maxPartTime>0 && maxPartTime<Long.MAX_VALUE-10){
+                    maxPartTime=maxPartTime/1000;
+                }else{
+                    continue;
+                }
+
+                if(maxPartTime<moveSince){
+                    if(!Files.isSymbolicLink((new File(fpath).toPath()))){
+                        map.put(fpath,"");
+                    }
+                }
+            }
+            cassandra.close();
+            list.addAll(map.keySet());
+            LOG.info("{} index file(s) to be migrated!",list.size());
+            long st=System.currentTimeMillis();
+            final byte [] lock=new byte[0];
+            MigrateDirectories migrateDirectories=new MigrateDirectories();
+            migrateDirectories.addAllString(destPath);
+
+            Thread [] thread =new Thread[destPath.size()];
+            for(int i=0;i<thread.length;++i){
+                thread[i]=new Thread(){
+                    @Override
+                    public void run(){
+                        while(true){
+                            String file=null;
+                            synchronized (lock){
+                                if(list.size()>0){
+                                    file=list.remove(0);
+                                }else{
+                                    break;
+                                }
+                            }
+                            long sst=System.currentTimeMillis();
+                            doMigrateIndex(ks,table,file,migrateDirectories);
+                            LOG.info("{} has been migrated successfully, time consumer:{}ms",
+                                    file,System.currentTimeMillis()-sst);
+                        }
+                    }
+                };
+                thread[i].start();
+            }
+
+            for(Thread t:thread)
+                t.join();
+            LOG.info("index migrate complete, time consume: {}ms",(System.currentTimeMillis()-st));
+        }catch (Exception ex){
+            LOG.error(ex.getMessage(),ex);
+        }
+    }
+
+    /**
+     * move lucene index in directory of fileString to one of migrateDirectories in following steps:
+     * 1. select one directory from migrateDirectories as the dest directory.
+     * 2. copy the entire directory of lucene index to the dest directory.
+     * 3. delete the directory of lucene index
+     * 4. create symbol link in order to make the original directory of lucene index pointing to the dest directory
+     * @param fileString directory of an instance of lucene index
+     * @param migrateDirectories
+     */
+    private static void doMigrateIndex(String ks,String table,String fileString, MigrateDirectories migrateDirectories){
+        MigrateDirectory directory=null;
+        try {
+            // 从待选迁移目标目录中选择一个剩余空间最大的目录作为迁移目标目录
+            directory = migrateDirectories.poll(0, 10);
+        } catch (InterruptedException e) {
+            LOG.error(e.getMessage(), e);
+        }
+
+        File file=new File(fileString);
+        if(directory == null || !FileUtils.noOthersUsing(file)){
+            LOG.error("directory is null or file is being used");
+        } else {
+            String ksTablePattern=ks+"/"+table;
+            String tableDir = file.getParentFile().getName();
+            String ksDir = file.getParentFile().getParentFile().getName();
+            String targetDir = directory.getAbsolutePath() + File.separator +
+                    ksDir + File.separator + tableDir;
+            int pos=fileString.indexOf(ksTablePattern);
+            if(pos<0){
+                throw new RuntimeException(fileString+" does not contain pattern "+ksTablePattern);
+            }
+            targetDir=directory.getAbsolutePath()+File.separator+fileString.substring(pos);
+            if(createDirIfNotExists(new File(targetDir))) {
+                File [] files=file.listFiles();
+                for(File f: files){
+                    FileUtils.copyFileLessInfo(f.toPath(),new File(targetDir+File.separator+f.getName()).toPath());
+                }
+                LOG.info("{} has been copied to {}",fileString,targetDir);
+                for(File f:files){
+                   FileUtils.deleteFile(f);
+                }
+                file.delete();
+                FileUtils.createSymbolicLink(file.toPath(),new File(targetDir).toPath());
+            } else{
+                LOG.error("move index failed");
+            }
+            // 重新将迁移目录放回,
+            // 先取出再放回的原因是迁移过后数据目录磁盘空间会发生变化，
+            // 因此该迁移目录的排序位置可能发生变化
+            migrateDirectories.add(directory);
+        }
+        return;
+    }
 }
