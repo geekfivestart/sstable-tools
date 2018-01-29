@@ -2,6 +2,7 @@ package cn.ac.iie.drive;
 
 import cn.ac.iie.cassandra.CassandraUtils;
 import cn.ac.iie.drive.commands.*;
+import cn.ac.iie.index.IndexFileHandler;
 import cn.ac.iie.migrate.MigrateUtils;
 import cn.ac.iie.move.MoveUtils;
 import cn.ac.iie.utils.KillSignalHandler;
@@ -13,6 +14,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import sun.misc.Signal;
 
+import java.io.File;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -96,8 +99,9 @@ public class Driver {
             put("sstable"," sstable  [-i] -k ksname -t table, 显示表在当前节点上的所有 sstable 文件信息\n"+
                     Strings.repeat(" ","sstable".length()+2)+
                     "其中，-i 表示是否显示由符号链接指示的sstable, ksname 为待显示表的 keyspace, table 为待显示表名\n");
-            put("geth","    geth ks tb hexkey, 从C*的本地结点中读取数据，ks,tb为要读取的keyspace和表名，hexkey为十六进制形式的DecoratedKey");
-            put("get","    get ks tb pk ck ..., 从C*的本地结点中读取数据，ks,tb为要读取的keyspace和表名，pk为字条串形式的分区值，ck为clustering 值");
+            put("geth","    geth ks tb hexkey, 从C*的本地结点中读取数据，ks,tb为要读取的keyspace和表名，hexkey为十六进制形式的DecoratedKey\n");
+            put("get","    get ks tb pk ck ..., 从C*的本地结点中读取数据，ks,tb为要读取的keyspace和表名，pk为字条串形式的分区值，ck为clustering 值\n");
+            put("mergeindexes","     mergeindexes baseindex index1 index2 ....,  将index1, index2... 索引合并到baseindex中，并删除index1...\n");
         }
     };
     public static void printHelpInfo(){
@@ -119,9 +123,11 @@ public class Driver {
         sb.append("\t");
         sb.append("sstable    显示当前节点上某个表的所有sstable文件\n");
         sb.append("\t");
-        sb.append("get        从本地C*节点获取数据,输入参数pk及ck为字符串形式") ;
+        sb.append("get        从本地C*节点获取数据,输入参数pk及ck为字符串形式\n") ;
         sb.append("\t");
-        sb.append("geth       从本地C*节点获取数据,输入参数pk及ck为十六进制形式") ;
+        sb.append("geth       从本地C*节点获取数据,输入参数pk及ck为十六进制形式\n") ;
+        sb.append("\t");
+        sb.append("mergeindexes 从本地C*节点获取数据,输入参数pk及ck为十六进制形式\n") ;
         sb.append("\t");
         sb.append("help <command> 显示每个命令的详情\n");
 
@@ -169,7 +175,7 @@ public class Driver {
                 return;
             }
             String hostip= localAddress.getHostAddress();
-            MoveUtils.moveIndex(args[1],Integer.parseInt(args[2]),hostip,args[3],
+            IndexFileHandler.moveIndex(args[1],Integer.parseInt(args[2]),hostip,args[3],
                     args[4],args[5],Long.parseLong(args[6]));
             return;
         }else if(args.length>0 && args[0].equals("migrate")){
@@ -214,7 +220,7 @@ public class Driver {
                 return;
             }
             String hostip= localAddress.getHostAddress();
-            MigrateUtils.migrateIndex(ip,port,hostip,ks,table,moveSince,list);
+            IndexFileHandler.migrateIndex(ip,port,hostip,ks,table,moveSince,list);
             return;
         }else if(args.length>0 && args[0].equals("cleanup")){
             if(args.length<4){
@@ -229,19 +235,44 @@ public class Driver {
             }
             MigrateUtils.cleanUpMigrateDirs(ks,table,list);
             return;
-        }else if(args.length>=4 && args[0].equals("geth")){
+        }else if(args.length>=1 && args[0].equals("geth")){
             NoOP();
+            if(args.length<4){
+                System.out.println("Missing paramers! "+cmdMap.get("geth"));
+                return;
+            }
             CassandraUtils.getlocalRecordByHex(args[1],args[2],args[3]);
             System.exit(0);
             return;
-        }else if(args.length>=4 && args[0].equals("get")){
+        }else if(args.length>=1 && args[0].equals("get")){
             NoOP();
+            if(args.length<4){
+                System.out.println("Missing paramers! "+cmdMap.get("get"));
+                return;
+            }
             String [] params=new String [args.length-4];
             for(int i=4;i<args.length;++i){
                 params[i-4]=args[i];
             }
             CassandraUtils.getlocalRecord(args[1],args[2],args[3],params);
             System.exit(0);
+        }else if(args.length>=1 && args[0].equals("mergeindexes")){
+            if(args.length<3){
+                System.err.println("Missing parameters! "+cmdMap.get("mergeindexes"));
+                return;
+            }
+
+            String priIndex=args[1];
+            String []tobeMerged=new String [args.length-2];
+            for(int i=2;i<args.length;++i){
+                tobeMerged[i-2]=args[i];
+            }
+            try {
+                IndexFileHandler.mergIndexes(priIndex,tobeMerged);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            return;
         }
         @SuppressWarnings("unchecked")
         List<Class<? extends Runnable>> commands = Lists.newArrayList(

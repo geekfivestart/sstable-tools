@@ -194,4 +194,20 @@ public class FileUtils {
         }
         return created;
     }
+
+    public static boolean deleteDirecotry(File file){
+        if(file.exists()==false){
+            return false;
+        }
+        if(file.isDirectory()){
+            File [] files=file.listFiles();
+            for(File f:files){
+                deleteDirecotry(f);
+            }
+            deleteFile(file);
+        }else{
+           deleteFile(file);
+        }
+        return true;
+    }
 }
