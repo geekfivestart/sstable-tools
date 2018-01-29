@@ -9,31 +9,41 @@ import com.google.common.collect.Maps;
 import com.google.common.io.CharStreams;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.CFStatement;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy;
+import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.SimpleDateType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.*;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.thrift.Column;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.MurmurHash;
+import org.apache.cassandra.utils.btree.BTreeSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.validation.constraints.NotNull;
 import java.io.*;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -445,5 +455,154 @@ public class CassandraUtils {
             throws NoSuchKeyspaceException, NoSuchTableException {
         CFMetaData table = tableFromName(keyspaceName, tableName);
         return table.cfName + "-" + ByteBufferUtil.bytesToHex(ByteBufferUtil.bytes(table.cfId));
+    }
+
+    public static void getlocalRecord(String ks,String tb,String pk,String ... ck){
+        Schema.instance.loadFromDisk(false);
+        Keyspace.setInitialized();
+        Keyspace.open("system");
+        Keyspace.open("system_schema");
+        Collection<ColumnFamilyStore> cfsColl=Keyspace.open(ks).getColumnFamilyStores();
+        ColumnFamilyStore cfs=null;
+        for(ColumnFamilyStore cf:cfsColl){
+            if(cf.name.equals(tb))
+                cfs=cf;
+        }
+        DecoratedKey dk=null;
+        NavigableSet<Clustering> navCluster=null;
+        CFMetaData cfm=null;
+        cfm=Schema.instance.getCFMetaData(ks,tb);
+        if(cfm.clusteringColumns().size()>0){
+            ByteBuffer l=ByteBufferUtil.bytes(pk);
+            dk=new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(l),l);
+            NavigableSet<Clustering> sortedClusterings = new TreeSet<>(cfs.metadata.comparator);
+            for(String c:ck){
+                ByteBuffer cl=ByteBufferUtil.bytes(c);
+                sortedClusterings.addAll(Arrays.asList(Clustering.make(cl)));
+            }
+            navCluster=sortedClusterings;
+        }else{
+            ByteBuffer l=ByteBufferUtil.bytes(pk);
+            dk=new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(l),l);
+            navCluster= BTreeSet.of(cfs.metadata.comparator,Clustering.EMPTY);
+        }
+        System.out.println("kd:"+dk+" clustering:"+navCluster);
+        final CFMetaData tmpcfm=cfm;
+        int[] count=new int[1];
+        printPartitionKey(tmpcfm,dk);
+        read(cfs,dk,navCluster,(int)System.currentTimeMillis()/1000).
+                forEachRemaining(Unfiltered->{
+                    System.out.println("row:"+Unfiltered.toString(tmpcfm));
+                    count[0]++;
+                });
+        System.out.println("record Count:"+count[0]);
+        shutdownBackgroundTasks();
+    }
+
+    public static void getlocalRecordByHex(String ks,String tb,String hex){
+        ByteBuffer bb=ByteBufferUtil.hexToBytes(hex);
+        Schema.instance.loadFromDisk(false);
+        Keyspace.setInitialized();
+        Keyspace.open("system");
+        Keyspace.open("system_schema");
+        Collection<ColumnFamilyStore> cfsColl=Keyspace.open(ks).getColumnFamilyStores();
+        ColumnFamilyStore cfs=null;
+        for(ColumnFamilyStore cf:cfsColl){
+            if(cf.name.equals(tb))
+                cfs=cf;
+        }
+        DecoratedKey dk=null;
+        NavigableSet<Clustering> navCluster=null;
+        CFMetaData cfm=null;
+        cfm=Schema.instance.getCFMetaData(ks,tb);
+        if(cfm.clusteringColumns().size()>0){
+            ByteBuffer [] l=split(bb,2);
+            dk=new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(l[0]),l[0]);
+            ByteBuffer [] cl=split(l[1],cfm.clusteringColumns().size());
+            NavigableSet<Clustering> sortedClusterings = new TreeSet<>(cfs.metadata.comparator);
+            if (cl.length > 0) {
+                sortedClusterings.addAll(Arrays.asList(Clustering.make(cl)));
+            }
+            navCluster=sortedClusterings;
+        }else{
+            dk=new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(bb),bb);
+            navCluster= BTreeSet.of(cfs.metadata.comparator,Clustering.EMPTY);
+        }
+        System.out.println("kd:"+dk+" clustering:"+navCluster);
+        final CFMetaData tmpcfm=cfm;
+        int[] count=new int[1];
+        printPartitionKey(tmpcfm,dk);
+        read(cfs,dk,navCluster,(int)System.currentTimeMillis()/1000).
+                forEachRemaining(Unfiltered->{
+                    System.out.println("row:"+Unfiltered.toString(tmpcfm));
+                    count[0]++;
+                });
+        System.out.println("record Count:"+count[0]);
+        shutdownBackgroundTasks();
+    }
+
+    private static void printPartitionKey(CFMetaData cfm,DecoratedKey key){
+        List<ColumnDefinition> columnDefinitions = cfm.partitionKeyColumns();
+        AbstractType<?> partitionType=cfm.getKeyValidator();
+        ByteBuffer[] components = partitionType instanceof CompositeType
+                ? ((CompositeType) partitionType).split(key.getKey())
+                : new ByteBuffer[]{key.getKey()};
+
+        for(ColumnDefinition cdf:columnDefinitions){
+            String name = cdf.name.toString();
+            ByteBuffer value = components[cdf.position()];
+            AbstractType<?> valueType = cdf.cellValueType();
+            Object va=compose(value,valueType);
+            System.out.println(name+":"+va);
+        }
+    }
+
+    public static Object compose(ByteBuffer value, AbstractType<?> type){
+        if(type instanceof SimpleDateType){
+            return ((SimpleDateType)type).toTimeInMillis(value);
+        }
+        return type.compose(value);
+    }
+
+    public static UnfilteredRowIterator read(ColumnFamilyStore table, DecoratedKey key,
+                                             NavigableSet<Clustering> clusterings,
+                                             int nowInSec) {
+        ClusteringIndexNamesFilter filter = new ClusteringIndexNamesFilter(clusterings, false);
+        ColumnFilter columnFilter = ColumnFilter.all(table.metadata);
+        SinglePartitionReadCommand cmd = SinglePartitionReadCommand.create(
+                table.metadata, nowInSec, key, columnFilter, filter);
+        ReadExecutionController controller = ReadUtil.controller(cmd);
+        UnfilteredRowIterator it =  cmd.queryMemtableAndDisk(table, controller);
+        controller.close();
+        return it;
+    }
+
+    private static boolean readStatic(ByteBuffer bb)
+    {
+        if (bb.remaining() < 2)
+            return false;
+
+        int header = ByteBufferUtil.getShortLength(bb, bb.position());
+        if ((header & 0xFFFF) != 0Xffff)
+            return false;
+
+        ByteBufferUtil.readShortLength(bb); // Skip header
+        return true;
+    }
+
+    public static ByteBuffer[] split(ByteBuffer name,int size)
+    {
+        // Assume all components, we'll trunk the array afterwards if need be, but
+        // most names will be complete.
+        ByteBuffer[] l = new ByteBuffer[size];
+        ByteBuffer bb = name.duplicate();
+        readStatic(bb);
+        int i = 0;
+        while (bb.remaining() > 0)
+        {
+            l[i++] = ByteBufferUtil.readBytesWithShortLength(bb);
+            bb.get(); // skip end-of-component
+        }
+        return i == l.length ? l : Arrays.copyOfRange(l, 0, i);
     }
 }

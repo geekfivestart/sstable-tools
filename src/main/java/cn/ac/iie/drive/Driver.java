@@ -1,14 +1,17 @@
 package cn.ac.iie.drive;
 
+import cn.ac.iie.cassandra.CassandraUtils;
 import cn.ac.iie.drive.commands.*;
 import cn.ac.iie.migrate.MigrateUtils;
 import cn.ac.iie.move.MoveUtils;
+import cn.ac.iie.utils.KillSignalHandler;
 import com.google.common.base.Strings;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import io.airlift.command.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import sun.misc.Signal;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -16,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.google.common.base.Throwables.getStackTraceAsString;
 
@@ -89,9 +93,11 @@ public class Driver {
                     "migrate_dirs:\t放置冷数据的目录，每行一个目录，可配置多个\n");
             put("describe","  describe -f file, 显示 sstable 文件的元数据, file为待显示的sstable文件\n");
             put("timestamp","  timestamp -f file, 显示 sstable 数据的时间戳范围, file为待显示的sstable文件\n");
-            put("sstable","  sstable [-i] -k ksname -t table, 显示表在当前节点上的所有 sstable 文件信息\n"+
+            put("sstable"," sstable  [-i] -k ksname -t table, 显示表在当前节点上的所有 sstable 文件信息\n"+
                     Strings.repeat(" ","sstable".length()+2)+
                     "其中，-i 表示是否显示由符号链接指示的sstable, ksname 为待显示表的 keyspace, table 为待显示表名\n");
+            put("geth","    geth ks tb hexkey, 从C*的本地结点中读取数据，ks,tb为要读取的keyspace和表名，hexkey为十六进制形式的DecoratedKey");
+            put("get","    get ks tb pk ck ..., 从C*的本地结点中读取数据，ks,tb为要读取的keyspace和表名，pk为字条串形式的分区值，ck为clustering 值");
         }
     };
     public static void printHelpInfo(){
@@ -113,11 +119,25 @@ public class Driver {
         sb.append("\t");
         sb.append("sstable    显示当前节点上某个表的所有sstable文件\n");
         sb.append("\t");
+        sb.append("get        从本地C*节点获取数据,输入参数pk及ck为字符串形式") ;
+        sb.append("\t");
+        sb.append("geth       从本地C*节点获取数据,输入参数pk及ck为十六进制形式") ;
+        sb.append("\t");
         sb.append("help <command> 显示每个命令的详情\n");
 
         System.out.print(sb.toString());
     }
+
+    public static AtomicBoolean debug=new AtomicBoolean(true);
     public static void main(String ... args) {
+        if(System.getProperty("debugmode")!=null){
+            try{
+                debug.set(Boolean.parseBoolean(System.getProperty("debugmode")));
+                System.out.println("debugmode:"+debug);
+            }catch (Exception ex){
+                System.err.println(ex.getMessage());
+            }
+        }
         for (String arg : args) {
             LOG.info(arg);
         }
@@ -125,6 +145,7 @@ public class Driver {
             printHelpInfo();
             return;
         }
+        Signal.handle(new Signal("TERM"), new KillSignalHandler());
         if(args.length==0 || args[0].equals("help")){
             if(args.length>1){
                 if(cmdMap.containsKey(args[1])){
@@ -208,6 +229,19 @@ public class Driver {
             }
             MigrateUtils.cleanUpMigrateDirs(ks,table,list);
             return;
+        }else if(args.length>=4 && args[0].equals("geth")){
+            NoOP();
+            CassandraUtils.getlocalRecordByHex(args[1],args[2],args[3]);
+            System.exit(0);
+            return;
+        }else if(args.length>=4 && args[0].equals("get")){
+            NoOP();
+            String [] params=new String [args.length-4];
+            for(int i=4;i<args.length;++i){
+                params[i-4]=args[i];
+            }
+            CassandraUtils.getlocalRecord(args[1],args[2],args[3],params);
+            System.exit(0);
         }
         @SuppressWarnings("unchecked")
         List<Class<? extends Runnable>> commands = Lists.newArrayList(
@@ -263,4 +297,13 @@ public class Driver {
         System.err.println(getStackTraceAsString(e));
     }
 
+    private static void NoOP(){
+        while(debug.get()==true){
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    }
 }
