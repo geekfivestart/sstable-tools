@@ -7,14 +7,18 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 * 冷数据迁移 (migrate)
 * 冷索引迁移 (migrateindex)
 * 无效冷数据删除 (cleanup)
-* 显示sstable文件元数据
-* 显示sstable中数据的时间戳范围
-* 显示表在当前节点上的所有sstable文件
+* 显示sstable文件元数据 (describe)
+* 显示sstable中数据的时间戳范围 (timestamp)
+* 显示表在当前节点上的所有sstable文件(sstable)
+* 从C* 本地节点读取数据，需要指定十六进制形式的主键 (geth)
+* 从C* 本地节点读取数据，需要指定分区列的值，以clustering的列的值 (get)
+* 合并索引文件 (mergeindexes)
 
 ## 一、使用方法
 
     sstable-tools [ move | moveindex | migrate | migrateindex | cleanup |
-    describe -f file | timestamp -f file | sstable [-i] -k ksname -t table ]
+    describe -f file | timestamp -f file | sstable [-i] -k ksname -t table |
+    geth ks tb dk| get ks tb pk [ck1...] | mergeindexes baseindex index1... ]
 
 ### 1.1 过期数据分离
     sstable-tools move
@@ -206,6 +210,18 @@ Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
 /data01/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-7-big-Data.db isSymbolicLink:true
 --finished--
 ```
+
+### 1.9 从C* 本地节点读取数据（geth）
+    sstable-tools geth ks tb dk
+    从本地数据结点读取数据，ks、tb分别代表 keyspace 及表名，dk为Decorated key的十六进制形式的字条串。此值由索引文件中_key字段得到。
+
+### 1.10 从C* 本地节点读取数据 (get)
+    sstable-tools get ks tb pk [ck1...]
+    从本地数据结点读取数据，ks、tb分别代表 keyspace 及表名，pk为分区列的值，ck1...等为clustering 列的值。pk及ck均为可读的字符串形式。
+
+### 1.11 合并索引文件
+    sstable-tools mergeindexes baseindex index1 ...
+    将索引文件index1...等进行合并到baseindex中，若baseindex不存在，则新创建一个索引文件并命名为baseindex。可以指定多个待合并的索引文件，每个索引文件以空间分隔。合并完成后，index1...等将被删除。
 
 ## 二、项目开发及构建
 本项目在jdk1.8 + IntelliJ环境下开发，使用[Apache Maven](https://maven.apache.org/)进行构建管理。
