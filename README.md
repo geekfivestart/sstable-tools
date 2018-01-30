@@ -92,7 +92,7 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 
 ### 1.6 显示 sstable 文件的元数据
     sstable-tools describe -f file
-    其中 file 为要显示的 sstable 文件
+其中 file 为要显示的 sstable 文件
 示例输出
 ```
 /Users/clohfink/git/sstable-tools/ma-119-big-Data.db
@@ -182,7 +182,7 @@ RegularColumns: {
 ```
 ### 1.7 显示 sstable 中数据的时间戳范围
     sstable-tools timestamp -f file
-    其中 file 为 sstable 文件
+其中 file 为 sstable 文件
   示例输出
   ```
 /data06/cassandra/data/test/resume-59c4b610816611e68f4ef144bf2e9d9f/mb-60-big-Data.db
@@ -193,7 +193,7 @@ Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
 
 ### 1.8 显示表在当前节点上的所有 sstable 文件
     sstable-tools sstable [-i] -k ksname -t table
-    其中，-i 表示是否显示由符号链接指示的sstable, ksname 为待显示表的 keyspace, table 为待显示表名
+其中，-i 表示是否显示由符号链接指示的sstable, ksname 为待显示表的 keyspace, table 为待显示表名
 
 示例输出
 ```
@@ -213,15 +213,15 @@ Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
 
 ### 1.9 从C* 本地节点读取数据（geth）
     sstable-tools geth ks tb dk
-    从本地数据结点读取数据，ks、tb分别代表 keyspace 及表名，dk为Decorated key的十六进制形式的字条串。此值由索引文件中_key字段得到。
+从本地数据结点读取数据，ks、tb分别代表 keyspace 及表名，dk为Decorated key的十六进制形式的字条串。此值由索引文件中_key字段得到。
 
 ### 1.10 从C* 本地节点读取数据 (get)
     sstable-tools get ks tb pk [ck1...]
-    从本地数据结点读取数据，ks、tb分别代表 keyspace 及表名，pk为分区列的值，ck1...等为clustering 列的值。pk及ck均为可读的字符串形式。
+从本地数据结点读取数据，ks、tb分别代表 keyspace 及表名，pk为分区列的值，ck1...等为clustering 列的值。pk及ck均为可读的字符串形式。
 
 ### 1.11 合并索引文件
     sstable-tools mergeindexes baseindex index1 ...
-    将索引文件index1...等进行合并到baseindex中，若baseindex不存在，则新创建一个索引文件并命名为baseindex。可以指定多个待合并的索引文件，每个索引文件以空间分隔。合并完成后，index1...等将被删除。
+将索引文件index1...等进行合并到baseindex中，若baseindex不存在，则新创建一个索引文件并命名为baseindex。可以指定多个待合并的索引文件，每个索引文件以空间分隔。合并完成后，index1...等将被删除。
 
 ## 二、项目开发及构建
 本项目在jdk1.8 + IntelliJ环境下开发，使用[Apache Maven](https://maven.apache.org/)进行构建管理。
