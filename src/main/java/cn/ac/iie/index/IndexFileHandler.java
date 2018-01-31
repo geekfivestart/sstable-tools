@@ -8,10 +8,16 @@ import cn.ac.iie.utils.FileUtils;
 import com.datastax.driver.core.Row;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.cassandra.db.BufferDecoratedKey;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.index.*;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.util.Bits;
+import org.apache.lucene.util.BytesRef;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,8 +25,10 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -447,5 +455,66 @@ public class IndexFileHandler {
         baseWriter.close();
         for(String s:indexes)
             FileUtils.deleteDirecotry(new File(s));
+    }
+
+    public static void indexSummary(String file){
+        try {
+            DirectoryReader reader = DirectoryReader.open(FSDirectory.open(Paths.get(file))) ;
+            System.out.println("=======================");
+            System.out.println(file);
+            System.out.println("Number of document:"+reader.numDocs());
+            reader.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void tkRange(String file,boolean isCompositeType,int n){
+        int count=n;
+        long lowbound=Long.MAX_VALUE;
+        long upperbound=Long.MIN_VALUE;
+        try {
+            System.out.println("===============================");
+            System.out.println(file);
+            DirectoryReader reader = DirectoryReader.open(FSDirectory.open(Paths.get(file))) ;
+            for (int i = 0; i < reader.leaves().size(); i++) {
+                LeafReader leafReader = reader.leaves().get(i).reader();
+                Bits bits = leafReader.getLiveDocs();
+                for (int j = 0; j < leafReader.maxDoc(); j++) {
+                    if (bits != null && bits.get(j) == false) {
+                        continue;
+                    }
+                    Document doc=leafReader.document(j);
+                    BytesRef br=doc.getBinaryValue("_key");
+                    ByteBuffer bbr=ByteBuffer.wrap(br.bytes);
+                    ByteBuffer hex=bbr.duplicate();
+                    DecoratedKey pk=null;
+                    if(isCompositeType){
+                        ByteBuffer bb=bbr.duplicate();
+                        ByteBuffer tmp= ByteBufferUtil.readBytesWithShortLength(bb);
+                        pk=new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(tmp),tmp);
+                    }else{
+                        pk=new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(bbr),bbr);
+                    }
+                    long tk=(Long)pk.getToken().getTokenValue();
+                    if(count-->0){
+                        System.out.println("token:"+tk+" hex:"+ByteBufferUtil.bytesToHex(hex));
+                    }
+
+                    if(tk<lowbound){
+                        lowbound=tk;
+                    }
+                    if(tk>upperbound){
+                        upperbound=tk;
+                    }
+                }
+            }
+            System.out.println("min tk:"+lowbound+"   max tk:"+upperbound);
+            reader.close();
+        } catch (IOException e) {
+            System.out.println(e.getMessage());
+        } finally {
+
+        }
     }
 }

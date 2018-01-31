@@ -102,6 +102,9 @@ public class Driver {
             put("geth","    geth ks tb hexkey, 从C*的本地结点中读取数据，ks,tb为要读取的keyspace和表名，hexkey为十六进制形式的DecoratedKey\n");
             put("get","    get ks tb pk ck ..., 从C*的本地结点中读取数据，ks,tb为要读取的keyspace和表名，pk为字条串形式的分区值，ck为clustering 值\n");
             put("mergeindexes","     mergeindexes baseindex index1 index2 ....,  将index1, index2... 索引合并到baseindex中，并删除index1...\n");
+            put("tkrange","     tkrange [-n num] [-c|-s] index1... , 输出索引中主键的token范围，num 决定输出每个索引中前num条记录的token值，默认为0\n " +
+                    "-c/-s为索引中主键是否为复合主键，-c代理复合主键，-s代表单一列主键， index1...为索引文件的路径，多个路径间使用空格间隔");
+            put("indexinfo","     indexinfo index1... , 输出索引文件信息，index1为索引文件路径，多个索引文件用空格间隔");
         }
     };
     public static void printHelpInfo(){
@@ -127,14 +130,18 @@ public class Driver {
         sb.append("\t");
         sb.append("geth       从本地C*节点获取数据,输入参数pk及ck为十六进制形式\n") ;
         sb.append("\t");
-        sb.append("mergeindexes 从本地C*节点获取数据,输入参数pk及ck为十六进制形式\n") ;
+        sb.append("mergeindexes 合并索引文件\n") ;
+        sb.append("\t");
+        sb.append("tkrange    查看索引文件主键token范围\n") ;
+        sb.append("\t");
+        sb.append("indexinfo  查看索引文件信息\n") ;
         sb.append("\t");
         sb.append("help <command> 显示每个命令的详情\n");
 
         System.out.print(sb.toString());
     }
 
-    public static AtomicBoolean debug=new AtomicBoolean(true);
+    public static AtomicBoolean debug=new AtomicBoolean(false);
     public static void main(String ... args) {
         if(System.getProperty("debugmode")!=null){
             try{
@@ -271,6 +278,34 @@ public class Driver {
                 IndexFileHandler.mergIndexes(priIndex,tobeMerged);
             } catch (IOException e) {
                 e.printStackTrace();
+            }
+            return;
+        }else if(args.length>=1 && args[0].equals("tkrange")){
+            int outputRecordNum=0;
+            boolean isComposedType=false;
+            int i=1;
+            while(args[i].startsWith("-n")||args[i].startsWith("-c")||args[i].startsWith("-s")){
+               if(args[i].equals("-n")){
+                   outputRecordNum=Integer.parseInt(args[i+1]);
+                   i+=2;
+               }else if(args[i].equals("-c")){
+                   isComposedType=true;
+                   i++;
+               }else if(args[i].equals("-s")){
+                   isComposedType=false;
+                   i++;
+               }else {
+                   System.out.println("unkonwn parameter ["+args[i]+"]");
+                   return;
+               }
+            }
+            for(int j=i;j<args.length;++j){
+                IndexFileHandler.tkRange(args[i],isComposedType,outputRecordNum);
+            }
+            return;
+        }else if(args.length>=1 && args[0].equals("indexinfo")){
+            for(int i=1;i<args.length;++i){
+                IndexFileHandler.indexSummary(args[i]);
             }
             return;
         }

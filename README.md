@@ -13,12 +13,15 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 * 从C* 本地节点读取数据，需要指定十六进制形式的主键 (geth)
 * 从C* 本地节点读取数据，需要指定分区列的值，以clustering的列的值 (get)
 * 合并索引文件 (mergeindexes)
+* 查看索引文件所包含记录的主键范围 (tkrange)
+* 查看索引文件信息 (indexinfo)
 
 ## 一、使用方法
 
     sstable-tools [ move | moveindex | migrate | migrateindex | cleanup |
     describe -f file | timestamp -f file | sstable [-i] -k ksname -t table |
-    geth ks tb dk| get ks tb pk [ck1...] | mergeindexes baseindex index1... ]
+    geth ks tb dk| get ks tb pk [ck1...] | mergeindexes baseindex index1...
+    tkrange [-n num] [-c|-s] index1... | indexinfo index1... ]
 
 ### 1.1 过期数据分离
     sstable-tools move
@@ -222,6 +225,14 @@ Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
 ### 1.11 合并索引文件
     sstable-tools mergeindexes baseindex index1 ...
 将索引文件index1...等进行合并到baseindex中，若baseindex不存在，则新创建一个索引文件并命名为baseindex。可以指定多个待合并的索引文件，每个索引文件以空间分隔。合并完成后，index1...等将被删除。
+
+### 1.12 查看索引文件所包含记录的主键范围
+    sstable-tools tkrange [-n num] [-c|-s] index1...
+用于查看指定文件中所包含主键的token范围。在输出token范围时也可输出索引文件中前若干条记录的token值，此记录数由num指定，num默认为0，即不输出记录的具体token值。 -c及-s用于指示主键是单列组成的简单主键还是复合主键，-c表示复合主键，-s表示简单主键，默认为简单主键。index1...代表索引文件路径，多个文件间以空格分隔。
+
+### 1.13 查看索引文件信息
+    sstable-tools indexinfo index1...
+  查询索引文件信息，如索引文件记录数，字段数等。 index1...代表索引路径，多个索引间以空格分隔。
 
 ## 二、项目开发及构建
 本项目在jdk1.8 + IntelliJ环境下开发，使用[Apache Maven](https://maven.apache.org/)进行构建管理。
