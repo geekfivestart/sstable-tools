@@ -105,6 +105,7 @@ public class Driver {
             put("tkrange","     tkrange [-n num] [-c|-s] index1... , 输出索引中主键的token范围，num 决定输出每个索引中前num条记录的token值，默认为0\n " +
                     "-c/-s为索引中主键是否为复合主键，-c代理复合主键，-s代表单一列主键， index1...为索引文件的路径，多个路径间使用空格间隔");
             put("indexinfo","     indexinfo index1... , 输出索引文件信息，index1为索引文件路径，多个索引文件用空格间隔");
+            put("indextkverify","");
         }
     };
     public static void printHelpInfo(){
@@ -307,6 +308,14 @@ public class Driver {
             for(int i=1;i<args.length;++i){
                 IndexFileHandler.indexSummary(args[i]);
             }
+            return;
+        }else if(args.length>=1 && args[0].equals("indextkverify")){
+            //ks,tb
+            if(args.length<3){
+                System.err.println("Missing parameters! "+cmdMap.get("indextkverify"));
+                return;
+            }
+            IndexFileHandler.indexFileTKVerify(args[1],args[2]);
             return;
         }
         @SuppressWarnings("unchecked")

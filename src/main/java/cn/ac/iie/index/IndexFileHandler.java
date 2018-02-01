@@ -5,12 +5,18 @@ import cn.ac.iie.migrate.MigrateDirectory;
 import cn.ac.iie.move.MoveUtils;
 import cn.ac.iie.utils.CassandraClient;
 import cn.ac.iie.utils.FileUtils;
+import cn.ac.iie.utils.TokenUtil;
 import com.datastax.driver.core.Row;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.*;
@@ -25,6 +31,8 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -473,6 +481,7 @@ public class IndexFileHandler {
         int count=n;
         long lowbound=Long.MAX_VALUE;
         long upperbound=Long.MIN_VALUE;
+        int recordNum=0;
         try {
             System.out.println("===============================");
             System.out.println(file);
@@ -507,14 +516,75 @@ public class IndexFileHandler {
                     if(tk>upperbound){
                         upperbound=tk;
                     }
+                    recordNum++;
                 }
             }
             System.out.println("min tk:"+lowbound+"   max tk:"+upperbound);
+            System.out.println("doc count:"+recordNum);
             reader.close();
         } catch (IOException e) {
             System.out.println(e.getMessage());
         } finally {
 
+        }
+    }
+
+    public static void indexFileTKVerify(String ks,String table){
+        //get local address
+        InetAddress localAddress = null;
+        try {
+            localAddress = InetAddress.getLocalHost();
+        } catch (UnknownHostException e) {
+            LOG.error(e.getMessage(),e);
+            return;
+        }
+        String host= localAddress.getHostAddress();
+        if(host==null){
+            System.out.println("cannot get local ip!");
+            return;
+        }
+
+        //init cassandra storage service
+        Schema.instance.loadFromDisk(false);
+        Keyspace.setInitialized();
+        Keyspace.open("system");
+        Keyspace.open("system_schema");
+
+        TokenUtil.mayInit(Keyspace.open(ks));
+        List<Range<Token>> localTkRange=TokenUtil.LOCAL_TK_RANGE_KS.get(ks);
+        if(localTkRange==null){
+            System.err.println("localTkRange is null");
+            return;
+        }
+
+        String query = "select * from mpp_schema.mpp_index " + "where ks='" + ks
+                + "' and tb='" + table + "' and hn='" + host + "' allow filtering ;";
+        LOG.info("QueryOrder:{}", query);
+
+        try{
+            UntypedResultSet rs=TokenUtil.executeQuery(query);
+            rs.forEach(row->{
+                long tk=row.getLong("tk");
+                boolean []flag=new boolean[1];
+                flag[0]=false;
+                localTkRange.forEach(range->{
+                    if((long)range.left.getTokenValue()<tk && tk<=(long)range.right.getTokenValue()){
+                        if(tk<(long)range.right.getTokenValue()){
+                            flag[0]=true;
+                            String uuid=row.getString("uuid");
+                            String fpath=row.getString("fpath");
+                            System.out.println("[range err 1] uuid:"+uuid+"  fpath:"+fpath);
+                        }
+                    }
+                });
+                if(flag[0]==false){
+                    String uuid=row.getString("uuid");
+                    String fpath=row.getString("fpath");
+                    System.out.println("[range err 2] uuid:"+uuid+"  fpath:"+fpath);
+                }
+            });
+        }catch (Throwable throwable){
+            LOG.error(throwable.getMessage(),throwable);
         }
     }
 }
