@@ -573,8 +573,8 @@ public class IndexFileHandler {
         LOG.info("QueryOrder:{}", query);
 
         CassandraClient client=new CassandraClient(metaIp,metaPort,"cassandra","cassandra");
-        String delsql="delete from mpp_schema.mpp_index where ks='{}' and tb='{}' and hn='{}' and uuid='{}'";
-        String updateSql="update mpp_schema.mpp_index set min_ar={}, max_ar={} where ks='{}' and tb='{}' and hn='{}' and uuid='{}'";
+        String delsql="delete from mpp_schema.mpp_index where ks='{}' and tb='{}' and hn='{}' and uuid='{}';";
+        String updateSql="update mpp_schema.mpp_index set min_ar={}, max_ar={} where ks='{}' and tb='{}' and hn='{}' and uuid='{}';";
         final int []rangeErr=new int[1];
         final int []notOnCur=new int[1];
         Map<String,List<String>> errIndex=new HashMap<>();
@@ -601,7 +601,7 @@ public class IndexFileHandler {
                             rangeErr[0]++;
                             String key=(long)range.right.getTokenValue()+"_"+pst+"_"+pend;
                             if(index.containsKey(key)){
-                                LOG.info("sstable-tools mergeindex {} {}",index.get(key).get(1),fpath);
+                                LOG.info("sstable-tools mergeindexes {} {}",index.get(key).get(1),fpath);
                                 if(ast<Long.parseLong(index.get(key).get(2))||
                                         aend>Long.parseLong(index.get(key).get(3))){
                                     LOG.info(updateSql,Math.min(ast,Long.parseLong(index.get(key).get(2))),
@@ -625,7 +625,7 @@ public class IndexFileHandler {
                                 if(errIndex.containsKey(key)){
                                     int i=0;
                                     while(i<errIndex.get(key).size()) {
-                                        LOG.info("sstable-tools mergeindex {} {}", fpath, errIndex.get(key).get(i+1));
+                                        LOG.info("sstable-tools mergeindexes {} {}", fpath, errIndex.get(key).get(i+1));
                                         if (ast > Long.parseLong(errIndex.get(key).get(i+2)) ||
                                                 aend < Long.parseLong(errIndex.get(key).get(i+3))) {
                                             LOG.info(updateSql, Math.min(ast, Long.parseLong(errIndex.get(key).get(i+2))),
