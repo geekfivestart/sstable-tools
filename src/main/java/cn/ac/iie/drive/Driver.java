@@ -310,12 +310,24 @@ public class Driver {
             }
             return;
         }else if(args.length>=1 && args[0].equals("indextkverify")){
+            NoOP();
             //ks,tb
             if(args.length<3){
                 System.err.println("Missing parameters! "+cmdMap.get("indextkverify"));
                 return;
             }
-            IndexFileHandler.indexFileTKVerify(args[1],args[2]);
+            String ip=System.getProperty("metaip");
+            if(ip==null||ip.length()==0){
+                System.err.println("metaip is null or length is 0");
+                return;
+            }
+            String port=System.getProperty("metaport");
+            if(port==null||port.length()==0){
+                System.err.println("port is null or length is 0");
+                return;
+            }
+            IndexFileHandler.indexFileTKVerify(args[1],args[2],ip,Integer.parseInt(port));
+            System.exit(0);
             return;
         }
         @SuppressWarnings("unchecked")

@@ -1,5 +1,6 @@
 package cn.ac.iie.index;
 
+import cn.ac.iie.cassandra.CassandraUtils;
 import cn.ac.iie.migrate.MigrateDirectories;
 import cn.ac.iie.migrate.MigrateDirectory;
 import cn.ac.iie.move.MoveUtils;
@@ -9,15 +10,24 @@ import cn.ac.iie.utils.TokenUtil;
 import com.datastax.driver.core.Row;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Multimap;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.NetworkTopologyStrategy;
+import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.BiMultiValMap;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.*;
 import org.apache.lucene.store.Directory;
@@ -31,16 +41,16 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.security.Key;
+import java.util.*;
 
 import static cn.ac.iie.utils.FileUtils.createDirIfNotExists;
 
@@ -48,7 +58,7 @@ import static cn.ac.iie.utils.FileUtils.createDirIfNotExists;
  * Created by zhangjc on 2018-1-29.
  */
 public class IndexFileHandler {
-    private static Logger LOG= LoggerFactory.getLogger(MoveUtils.class);
+    private static Logger LOG= LoggerFactory.getLogger(IndexFileHandler.class);
 
     public  static final String COL_HOSTNAME                     = "hn";
     public  static final String COL_KEYSPACE                     = "ks";
@@ -529,7 +539,7 @@ public class IndexFileHandler {
         }
     }
 
-    public static void indexFileTKVerify(String ks,String table){
+    public static void indexFileTKVerify(String ks,String table,String metaIp,int metaPort){
         //get local address
         InetAddress localAddress = null;
         try {
@@ -544,47 +554,221 @@ public class IndexFileHandler {
             return;
         }
 
-        //init cassandra storage service
         Schema.instance.loadFromDisk(false);
         Keyspace.setInitialized();
         Keyspace.open("system");
         Keyspace.open("system_schema");
+        Keyspace.open("mpp_schema");
 
-        TokenUtil.mayInit(Keyspace.open(ks));
-        List<Range<Token>> localTkRange=TokenUtil.LOCAL_TK_RANGE_KS.get(ks);
-        if(localTkRange==null){
-            System.err.println("localTkRange is null");
+        List<Range<Token>> tkrange=getlocalTkRangeForKs(ks);
+
+        if(tkrange==null||tkrange.size()==0){
+            System.err.println("tkrange is null");
             return;
         }
+        LOG.info("token range for {} :{}",ks,tkrange);
 
         String query = "select * from mpp_schema.mpp_index " + "where ks='" + ks
                 + "' and tb='" + table + "' and hn='" + host + "' allow filtering ;";
         LOG.info("QueryOrder:{}", query);
 
+        CassandraClient client=new CassandraClient(metaIp,metaPort,"cassandra","cassandra");
+        String delsql="delete from mpp_schema.mpp_index where ks='{}' and tb='{}' and hn='{}' and uuid='{}'";
+        String updateSql="update mpp_schema.mpp_index set min_ar={}, max_ar={} where ks='{}' and tb='{}' and hn='{}' and uuid='{}'";
+        final int []rangeErr=new int[1];
+        final int []notOnCur=new int[1];
+        Map<String,List<String>> errIndex=new HashMap<>();
+        Map<String,List<String>> index=new HashMap<>();
         try{
-            UntypedResultSet rs=TokenUtil.executeQuery(query);
-            rs.forEach(row->{
+            //UntypedResultSet rs=CassandraUtils.executeQuery(query);
+            client.ConnectCassandra();
+            Iterator<Row> rs=client.queryResult(query);
+            rs.forEachRemaining(row->{
                 long tk=row.getLong("tk");
                 boolean []flag=new boolean[1];
                 flag[0]=false;
-                localTkRange.forEach(range->{
+                for(Range<Token> range:tkrange){
                     if((long)range.left.getTokenValue()<tk && tk<=(long)range.right.getTokenValue()){
+                        flag[0]=true;
+                        String uuid=row.getString("uuid");
+                        String fpath=row.getString("fpath");
+                        long pst=row.getLong("min_pr");
+                        long pend=row.getLong("max_pr");
+                        final long ast=row.getLong("min_pr");
+                        final long aend=row.getLong("max_pr");
                         if(tk<(long)range.right.getTokenValue()){
-                            flag[0]=true;
-                            String uuid=row.getString("uuid");
-                            String fpath=row.getString("fpath");
-                            System.out.println("[range err 1] uuid:"+uuid+"  fpath:"+fpath);
+                            System.out.println("mismatch token, tk:"+tk+" currange:"+range+" uuid:"+uuid+"  fpath:"+fpath);
+                            rangeErr[0]++;
+                            String key=(long)range.right.getTokenValue()+"_"+pst+"_"+pend;
+                            if(index.containsKey(key)){
+                                LOG.info("sstable-tools mergeindex {} {}",index.get(key).get(1),fpath);
+                                if(ast<Long.parseLong(index.get(key).get(2))||
+                                        aend>Long.parseLong(index.get(key).get(3))){
+                                    LOG.info(updateSql,Math.min(ast,Long.parseLong(index.get(key).get(2))),
+                                            Math.max(aend,Long.parseLong(index.get(key).get(3))),ks,table,host,uuid);
+                                }
+                            }else{
+                                if(errIndex.containsKey(key)){
+                                    errIndex.get(key).add(uuid);
+                                    errIndex.get(key).add(fpath);
+                                    errIndex.get(key).add(ast+"");
+                                    errIndex.get(key).add(aend+"");
+                                }else{
+                                    errIndex.put(key,new ArrayList<String>(){{add(uuid);add(fpath);add(ast+"");add(aend+"");}});
+                                }
+                            }
+                        }else{
+                            String key=(long)range.right.getTokenValue()+"_"+pst+"_"+pend;
+                            if(!index.containsKey(key)){
+                                long []tast=new long[1];
+                                long []taend=new long[1];
+                                if(errIndex.containsKey(key)){
+                                    int i=0;
+                                    while(i<errIndex.get(key).size()) {
+                                        LOG.info("sstable-tools mergeindex {} {}", fpath, errIndex.get(key).get(i+1));
+                                        if (ast > Long.parseLong(errIndex.get(key).get(i+2)) ||
+                                                aend < Long.parseLong(errIndex.get(key).get(i+3))) {
+                                            LOG.info(updateSql, Math.min(ast, Long.parseLong(errIndex.get(key).get(i+2))),
+                                                    Math.max(aend, Long.parseLong(errIndex.get(key).get(i+3))), ks, table, host, uuid);
+                                            tast[0] = Math.min(ast, Long.parseLong(errIndex.get(key).get(i+2)));
+                                            taend[0] = Math.max(aend, Long.parseLong(errIndex.get(key).get(i+3)));
+                                        }
+                                        i+=4;
+                                    }
+                                    errIndex.remove(key);
+                                }
+                                index.put(key,new ArrayList<String>(){{add(uuid);add(fpath);add(tast[0]+"");add(taend[0]+"");}});
+                            }
                         }
+                        break;
                     }
-                });
+                }
                 if(flag[0]==false){
                     String uuid=row.getString("uuid");
                     String fpath=row.getString("fpath");
-                    System.out.println("[range err 2] uuid:"+uuid+"  fpath:"+fpath);
+                    System.out.println("not on current node. tk:"+tk+" uuid:"+uuid+"  fpath:"+fpath);
+                    LOG.info(delsql,ks,table,host,uuid);
+                    LOG.info("rm -rf {}",fpath);
+                    notOnCur[0]++;
                 }
             });
+            System.out.println("range calculate error index:"+rangeErr[0]);
+            System.out.println("index not on current node:"+notOnCur[0]);
         }catch (Throwable throwable){
             LOG.error(throwable.getMessage(),throwable);
+        }finally {
+            client.close();
         }
+    }
+
+    /**
+     * get Token range for <tt>tt<tt/> of current node, including primary ranges and replica ranges
+     * @param ks
+     * @return
+     */
+    private static List<Range<Token>> getlocalTkRangeForKs(String ks){
+        Keyspace keyspace=Keyspace.open(ks);
+        AbstractReplicationStrategy repStrategy=keyspace.getReplicationStrategy();
+        assert repStrategy instanceof NetworkTopologyStrategy:"keyspace ["+ks+"] does not use NetworkTopologyStrategy";
+        assert ((NetworkTopologyStrategy) repStrategy).getDatacenters().size()==1:
+                "keyspace ["+ks+"] spreads on more than 1 dcs";
+        NetworkTopologyStrategy ntTopoplogyStrategy=(NetworkTopologyStrategy)repStrategy;
+        String dc=(String)ntTopoplogyStrategy.getDatacenters().toArray()[0];
+
+        //get Token for current dc
+        TokenMetadata tokenMetadata=new TokenMetadata();
+        Multimap<InetAddress, Token> loadedTokens = CassandraUtils.loadTokens(dc);
+        Map<InetAddress,String> inetAddressStringMap=CassandraUtils.loadRackForDC(dc);
+        String currRack=CassandraUtils.getCurrentNodeRack();
+        assert  inetAddressStringMap.size()==loadedTokens.keySet().size():"size of inetAddressStringMap is not equal to size of loadedTokens";
+        assert currRack!=null;
+        TokenMetadata.Topology topology =tokenMetadata.getTopology();
+        Method method=null;
+        Field field=null;
+        Field stField=null;
+        try{
+            field=TokenMetadata.class.getDeclaredField("tokenToEndpointMap");
+            field.setAccessible(true);
+            stField=TokenMetadata.class.getDeclaredField("sortedTokens");
+            stField.setAccessible(true);
+            Class innerClazz[] = TokenMetadata.class.getDeclaredClasses();
+            for(Class clazz:innerClazz){
+                if(clazz.getName().endsWith("Topology")){
+                    Method [] ms=clazz.getDeclaredMethods();
+                    for(Method m:ms){
+                        if(m.getName().equals("doAddEndpoint")){
+                           method=m;
+                           method.setAccessible(true);
+                        }
+                    }
+                    //method=clazz.getDeclaredMethod("doAddEndpoint");
+                    //method.setAccessible(true);
+                }
+            }
+
+        }catch (Exception ex){
+            System.err.println(ex.getMessage());
+            LOG.error(ex.getMessage(),ex);
+        }
+
+        inetAddressStringMap.put(FBUtilities.getBroadcastAddress(),currRack);
+        loadedTokens.putAll(FBUtilities.getBroadcastAddress(), SystemKeyspace.getSavedTokens());
+        for (InetAddress ep : loadedTokens.keySet()){
+            try {
+                method.invoke(topology,ep,dc,inetAddressStringMap.get(ep));
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            } catch (InvocationTargetException e) {
+                e.printStackTrace();
+            }
+            BiMultiValMap<Token, InetAddress> biMultiValMap=null;
+            try {
+                biMultiValMap=(BiMultiValMap<Token, InetAddress>) field.get(tokenMetadata);
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            }
+            for(Token token:loadedTokens.get(ep)){
+                biMultiValMap.put(token,ep);
+            }
+        }
+           // tokenMetadata.updateNormalTokens(loadedTokens.get(ep), ep);
+
+        List<Token> sortedToken=new ArrayList<>(loadedTokens.values());
+//        Map<Token,InetAddress> map=new HashMap<>();
+//        loadedTokens.entries().forEach(en->{
+//            map.put(en.getValue(),en.getKey());
+//        });
+
+        InetAddress localAddress = null;
+        try {
+            localAddress = InetAddress.getLocalHost();
+        } catch (UnknownHostException e) {
+            LOG.error(e.getMessage(),e);
+            return null;
+        }
+
+        List<Range<Token>> list=new ArrayList<>();
+
+        //select token range for current node
+        Collections.sort(sortedToken);
+        Token last=sortedToken.get(sortedToken.size()-1);
+        InetAddress finalLocalAddress = localAddress;
+        ArrayList<Token> alist=null;
+        try{
+            alist=(ArrayList<Token>)stField.get(tokenMetadata);
+        }catch (Exception ex){
+           System.err.println(ex.getMessage());
+        }
+        alist.addAll(sortedToken);
+        tokenMetadata.sortedTokens();
+        for(Token tk:sortedToken){
+            long n=ntTopoplogyStrategy.calculateNaturalEndpoints(tk,tokenMetadata).
+                    parallelStream().filter(inet->inet.equals(finalLocalAddress)).count();
+            if(n>0){
+                list.add(new Range<>(last,tk));
+            }
+            last=tk;
+        }
+        return list;
     }
 }

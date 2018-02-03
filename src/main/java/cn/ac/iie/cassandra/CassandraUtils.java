@@ -4,8 +4,10 @@ import cn.ac.iie.drive.Driver;
 import cn.ac.iie.sstable.SSTableUtils;
 import cn.ac.iie.utils.InvokeUtils;
 import com.google.common.base.Strings;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.SetMultimap;
 import com.google.common.io.CharStreams;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
@@ -13,6 +15,7 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.CFStatement;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
 import org.apache.cassandra.db.*;
@@ -22,15 +25,15 @@ import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.CompositeType;
-import org.apache.cassandra.db.marshal.SimpleDateType;
-import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.*;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.thrift.Column;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -41,11 +44,14 @@ import org.slf4j.LoggerFactory;
 
 import javax.validation.constraints.NotNull;
 import java.io.*;
+import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.RunnableScheduledFuture;
 import java.util.concurrent.TimeUnit;
+
+import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 
 /**
  * Cassandra操作工具类
@@ -604,5 +610,58 @@ public class CassandraUtils {
             bb.get(); // skip end-of-component
         }
         return i == l.length ? l : Arrays.copyOfRange(l, 0, i);
+    }
+
+    public static SetMultimap<InetAddress, Token> loadTokens(String dc)
+    {
+        SetMultimap<InetAddress, Token> tokenMap = HashMultimap.create();
+        for (UntypedResultSet.Row row : executeInternal("SELECT peer, tokens,data_center FROM system.peers"))
+        {
+            InetAddress peer = row.getInetAddress("peer");
+            if (row.has("tokens")&& row.getString("data_center").equals(dc))
+                tokenMap.putAll(peer, deserializeTokens(row.getSet("tokens", UTF8Type.instance)));
+        }
+
+        return tokenMap;
+    }
+
+    public static Map<InetAddress,String> loadRackForDC(String dc){
+        Map<InetAddress,String> inetToRack=new HashMap<>();
+        for (UntypedResultSet.Row row : executeInternal("SELECT peer, rack,data_center FROM system.peers"))
+        {
+            InetAddress peer = row.getInetAddress("peer");
+            if (row.has("rack")&& row.getString("data_center").equals(dc))
+                inetToRack.put(peer,row.getString("rack"));
+        }
+
+        return inetToRack;
+    }
+
+    public static String getCurrentNodeRack(){
+        for (UntypedResultSet.Row row : executeInternal("SELECT peer, rack,data_center FROM system.peers"))
+        {
+            InetAddress peer = row.getInetAddress("peer");
+            if (row.has("rack"))
+                return row.getString("rack");
+        }
+        return null;
+    }
+
+    private static Collection<Token> deserializeTokens(Collection<String> tokensStrings)
+    {
+        Token.TokenFactory factory = StorageService.instance.getTokenFactory();
+        List<Token> tokens = new ArrayList<>(tokensStrings.size());
+        for (String tk : tokensStrings)
+            tokens.add(factory.fromString(tk));
+        return tokens;
+    }
+
+
+    public static UntypedResultSet executeQuery(String cql) {
+        return executeInternal(cql);
+        /*return QueryProcessor.execute(cql,
+                ConsistencyLevel.ONE,
+                new QueryState(ClientState.forInternalCalls()));
+                */
     }
 }

@@ -1,5 +1,6 @@
 package cn.ac.iie.utils;
 
+import cn.ac.iie.cassandra.CassandraUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -122,9 +123,9 @@ public class TokenUtil {
         if(!KS_TOKEN_ENDPOINTS.containsKey(keyspace.getName())) {
             synchronized (OBJ) {
                 if(!KS_TOKEN_ENDPOINTS.containsKey(keyspace.getName())) {
-                    while (!StorageService.instance.isInitialized()) {
-                        waitSomeSeconds(1);
-                    }
+                  //  while (!StorageService.instance.isInitialized()) {
+                  //      waitSomeSeconds(1);
+                  //  }
                     getTokenToEndpointMap();
                     // local dc
                     String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
@@ -424,7 +425,7 @@ public class TokenUtil {
     private static long getCount(String cql) {
         while (true) {
             try {
-                UntypedResultSet rs = executeQuery(cql);
+                UntypedResultSet rs = CassandraUtils.executeQuery(cql);
                 if (rs == null || rs.isEmpty()) {
                     LOG.info("can't get peers count, please wait 1s");
                 } else {
@@ -445,11 +446,5 @@ public class TokenUtil {
         }
     }
 
-    public static UntypedResultSet executeQuery(String cql) {
-        LOG.debug("executing cql: {}", cql);
-        return QueryProcessor.execute(cql,
-                ConsistencyLevel.ONE,
-                new QueryState(ClientState.forInternalCalls()));
-    }
 }
 
