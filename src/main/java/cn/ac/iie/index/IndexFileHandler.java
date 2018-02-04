@@ -626,6 +626,7 @@ public class IndexFileHandler {
                                     int i=0;
                                     while(i<errIndex.get(key).size()) {
                                         LOG.info("sstable-tools mergeindexes {} {}", fpath, errIndex.get(key).get(i+1));
+                                        LOG.info(delsql,ks,table,host,errIndex.get(key).get(i));
                                         if (ast > Long.parseLong(errIndex.get(key).get(i+2)) ||
                                                 aend < Long.parseLong(errIndex.get(key).get(i+3))) {
                                             LOG.info(updateSql, Math.min(ast, Long.parseLong(errIndex.get(key).get(i+2))),
@@ -652,6 +653,9 @@ public class IndexFileHandler {
                     notOnCur[0]++;
                 }
             });
+            if(errIndex.size()!=0){
+                LOG.info(errIndex.toString());
+            }
             System.out.println("range calculate error index:"+rangeErr[0]);
             System.out.println("index not on current node:"+notOnCur[0]);
         }catch (Throwable throwable){
