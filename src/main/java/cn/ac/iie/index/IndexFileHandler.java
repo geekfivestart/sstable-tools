@@ -3,16 +3,13 @@ package cn.ac.iie.index;
 import cn.ac.iie.cassandra.CassandraUtils;
 import cn.ac.iie.migrate.MigrateDirectories;
 import cn.ac.iie.migrate.MigrateDirectory;
-import cn.ac.iie.move.MoveUtils;
 import cn.ac.iie.utils.CassandraClient;
 import cn.ac.iie.utils.FileUtils;
-import cn.ac.iie.utils.TokenUtil;
 import com.datastax.driver.core.Row;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -23,14 +20,11 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.schema.KeyspaceMetadata;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.BiMultiValMap;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.*;
-import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
@@ -47,9 +41,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.Key;
 import java.util.*;
 
 import static cn.ac.iie.utils.FileUtils.createDirIfNotExists;
@@ -454,21 +446,27 @@ public class IndexFileHandler {
      * @param indexes
      */
     public static void mergIndexes(String base,String ... indexes) throws IOException {
-        Directory dirs[]=new Directory[indexes.length];
+        //CodecReader reader[]=new CodecReader[indexes.length];
+        List<CodecReader> readerList=new ArrayList<>();
         int i=0;
         for(String s:indexes){
             File f=new File(s);
             if(!f.exists()){
                 throw new RuntimeException(s+" not exist");
             }
-            dirs[i++]=FSDirectory.open(new File(s).toPath());
+            for(LeafReaderContext lr:DirectoryReader.open(FSDirectory.open(new File(s).toPath())).leaves()){
+                readerList.add(SlowCodecReaderWrapper.wrap(lr.reader()));
+            }
         }
         IndexWriterConfig iwc=new IndexWriterConfig();
         iwc.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND);
         IndexWriter baseWriter=new IndexWriter(FSDirectory.open(new File(base).toPath()),iwc);
         System.out.println("maxDoc before merge:"+baseWriter.maxDoc());
-        baseWriter.addIndexes(dirs);
-        baseWriter.commit();
+        for(CodecReader cr:readerList) {
+            baseWriter.addIndexes(cr);
+            baseWriter.commit();
+            cr.close();
+        }
         System.out.println("maxDoc after merge:"+baseWriter.maxDoc());
         baseWriter.close();
         for(String s:indexes)
