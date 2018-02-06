@@ -2,9 +2,9 @@
 
 SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具，目前项目处于不断的开发中，当前仅在cassandra 3.8 环境中进行测试验证，在其它版本下运行可能出现不可预知情况。SSTable Tools具有如下功能：
 
-* [过期数据分离 (move)](#1.1)
-* [过期索引分离 (moveindex)](### 1.2 过期索引分离)
-* [冷数据迁移 (migrate)](#1.3)
+* [过期数据分离 (move)](### 1.1)
+* [过期索引分离 (moveindex)](###-1.2-过期索引分离)
+* [冷数据迁移 (migrate)](### 1.3-冷数据迁移)
 * [冷索引迁移 (migrateindex)](#1.4)
 * [无效冷数据删除 (cleanup)](#1.5)
 * [显示sstable文件元数据 (describe)](#1.6)
@@ -55,7 +55,7 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 注：此命令将修改mpp-engine的元数据服务，元数据服务的ip及端口由 sstable-tools 脚本文件中的 ip 及 port 变量配置。
 首次执行此命令前需要进行确认。
 
-### <span id="1.3">1.3 冷数据迁移</span>
+### 1.3 冷数据迁移
     sstable-tools migrate
 用于将冷数据(一定时间段之前的数据)从原始目录移动到新目录，并在原目录中建立符号链接指向新目录下的文件，这样便可实现将新数据放置在高速磁盘上(如SSD)，冷数据放置到低速磁盘(如机械硬盘)上的目的。
 执行此命令前，<font color=red>务必停止运行 mpp-engine 服务，即 nodetool drain && pkill -9 impalad。</font>
