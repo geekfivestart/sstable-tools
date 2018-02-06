@@ -10,6 +10,7 @@ import com.google.common.base.Strings;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import io.airlift.command.*;
+import org.apache.lucene.index.CheckIndex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import sun.misc.Signal;
@@ -106,6 +107,7 @@ public class Driver {
                     "-c/-s为索引中主键是否为复合主键，-c代理复合主键，-s代表单一列主键， index1...为索引文件的路径，多个路径间使用空格间隔");
             put("indexinfo","     indexinfo index1... , 输出索引文件信息，index1为索引文件路径，多个索引文件用空格间隔");
             put("indextkverify","");
+            put("checkindex","    checkindex [-exorcise] [-crossCheckTermVectors] [-segment X] [-segment Y] [-dir-impl X] indexpath, 检测索引文件状态，修正索引中的异常");
         }
     };
     public static void printHelpInfo(){
@@ -328,6 +330,19 @@ public class Driver {
             }
             IndexFileHandler.indexFileTKVerify(args[1],args[2],ip,Integer.parseInt(port));
             System.exit(0);
+            return;
+        }else if(args.length>1 && args[0].equals("checkindex")){
+            String []para=new String[args.length-1];
+            for(int i=1;i<args.length;++i){
+                para[i-1]=args[i];
+            }
+            try {
+                CheckIndex.main(para);
+            } catch (IOException e) {
+                e.printStackTrace();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
             return;
         }
         @SuppressWarnings("unchecked")
