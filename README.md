@@ -2,21 +2,21 @@
 
 SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具，目前项目处于不断的开发中，当前仅在cassandra 3.8 环境中进行测试验证，在其它版本下运行可能出现不可预知情况。SSTable Tools具有如下功能：
 
-* [过期数据分离 (move)](### 1.1)
+* [过期数据分离 (move)](#11-过期数据分离)
 * [过期索引分离 (moveindex)](#12-过期索引分离)
-* [冷数据迁移 (migrate)](### 1.3-冷数据迁移)
-* [冷索引迁移 (migrateindex)](#1.4)
-* [无效冷数据删除 (cleanup)](#1.5)
-* [显示sstable文件元数据 (describe)](#1.6)
-* [显示sstable中数据的时间戳范围 (timestamp)](#1.7)
-* [显示表在当前节点上的所有sstable文件(sstable)](#1.8)
-* [从C* 本地节点读取数据，需要指定十六进制形式的主键 (geth)](#1.9)
-* [从C* 本地节点读取数据，需要指定分区列的值，以clustering的列的值 (get)](#1.10)
-* [合并索引文件 (mergeindexes)](#1.11)
-* [查看索引文件所包含记录的主键范围 (tkrange)](#1.12)
-* [查看索引文件信息 (indexinfo)](#1.13)
-* [检测索引索引文件token分布 (indextkverify)](#1.14)
-* [检查索引文件状态 (checkindex)](#1.15)
+* [冷数据迁移 (migrate)](#13-冷数据迁移)
+* [冷索引迁移 (migrateindex)](#14-冷索引迁移)
+* [无效冷数据删除 (cleanup)](#15-无效冷数据删除)
+* [显示sstable文件元数据 (describe)](#16-显示-sstable-文件的元数据)
+* [显示sstable中数据的时间戳范围 (timestamp)](#17-显示-sstable-中数据的时间戳范围)
+* [显示表在当前节点上的所有sstable文件(sstable)](#18-显示表在当前节点上的所有-sstable-文件)
+* [从C* 本地节点读取数据，需要指定十六进制形式的主键 (geth)](#19-从C*-本地节点读取数据(geth))
+* [从C* 本地节点读取数据，需要指定分区列的值，以clustering的列的值 (get)](#110-从C*-本地节点读取数据(geth))
+* [合并索引文件 (mergeindexes)](#111-合并索引文件)
+* [查看索引文件所包含记录的主键范围 (tkrange)](#112-查看索引文件所包含记录的主键范围)
+* [查看索引文件信息 (indexinfo)](#113-查看索引文件信息)
+* [检测索引索引文件token分布 (indextkverify)](#114-检测索引索引文件token分布)
+* [检查索引文件状态 (checkindex)](#115-检查索引文件状态)
 
 ## 一、使用方法
 
@@ -26,7 +26,7 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
     tkrange [-n num] [-c|-s] index1... | indexinfo index1... |
     indexinfo index1...| indextkverify ks table| checkindex [-exorcise] [-crossCheckTermVectors] [-segment X] [-segment Y] [-dir-impl X] indexpath ]
 
-### 1.1 <span id="1.1">过期数据分离</span>
+### 1.1 过期数据分离
     sstable-tools move
 用于将原表中的过期数据移动到新表中，此命令仅移动 cassandra 中数据，并不移动索引文件。
 执行此命令前，<font color=red>需要先创建新表，并务必停止运行 mpp-engine 服务，即 nodetool drain && pkill -9 impalad。</font>
@@ -68,7 +68,7 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 |move_since|以秒为单位的时间戳，即对包含数据的最大<br>时间戳小于move_since的sstable进行迁移|
 |migrate_dirs|放置冷数据的目录，每行一个目录，可配置多个|
 
-### <span id="1.4">1.4 冷索引迁移</span>
+### 1.4 冷索引迁移
     sstable-tools migrateindex
 
 用于将冷索引(一定时间段之前的索引)从原始目录移动到新目录，并建立符号链接指向新目录，这样便可实现将新索引放置在高速磁盘上(如SSD)，冷索引放置到低速磁盘(如机械硬盘)上的目的。
@@ -82,7 +82,7 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 |move_since|以秒为单位的时间戳，即对包含数据的最大<br>时间戳小于move_since的索引文件进行迁移|
 |migrate_index_dirs|放置冷数据的目录，每行一个目录，可配置多个|
 
-### <span id="1.5">1.5 无效冷数据删除</span>
+### 1.5 无效冷数据删除
     sstable-tools cleanup
   cassandra运行过程中，在进行compaction进会删除原有的数据文件，生成新的数据文件。若数据文件已经被
   迁移到冷数据目录后，在compaction时间仅会删除指向冷数据目录的符号链接，并不会删除冷数据，进而产生无用的
@@ -96,7 +96,7 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 |table|表名|
 |migrate_dirs|放置冷数据的目录，每行一个目录，可配置多个|
 
-### <span id="1.6">1.6 显示 sstable 文件的元数据</span>
+### 1.6 显示 sstable 文件的元数据
     sstable-tools describe -f file
 其中 file 为要显示的 sstable 文件
 示例输出
@@ -186,7 +186,7 @@ RegularColumns: {
     f5:org.apache.cassandra.db.marshal.UTF8Type
 }
 ```
-### <span id="1.7">1.7 显示 sstable 中数据的时间戳范围</span>
+### 1.7 显示 sstable 中数据的时间戳范围
     sstable-tools timestamp -f file
 其中 file 为 sstable 文件
   示例输出
@@ -197,7 +197,7 @@ Minimum timestamp: 1474892678232006 (2016-09-26 20:24:38)
 Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
   ```
 
-### <span id="1.8">1.8 显示表在当前节点上的所有 sstable 文件</span>
+### 1.8 显示表在当前节点上的所有 sstable 文件
     sstable-tools sstable [-i] -k ksname -t table
 其中，-i 表示是否显示由符号链接指示的sstable, ksname 为待显示表的 keyspace, table 为待显示表名
 
@@ -217,32 +217,32 @@ Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
 --finished--
 ```
 
-### <span id="1.9">1.9 从C* 本地节点读取数据（geth）</span>
+### 1.9 从C* 本地节点读取数据(geth)
     sstable-tools geth ks tb dk
 从本地数据结点读取数据，ks、tb分别代表 keyspace 及表名，dk为Decorated key的十六进制形式的字条串。此值由索引文件中_key字段得到。
 
-### <span id="1.10">1.10 从C* 本地节点读取数据 (get)</span>
+### 1.10 从C* 本地节点读取数据(get)
     sstable-tools get ks tb pk [ck1...]
 从本地数据结点读取数据，ks、tb分别代表 keyspace 及表名，pk为分区列的值，ck1...等为clustering 列的值。pk及ck均为可读的字符串形式。
 
-### <span id="1.11">1.11 合并索引文件</span>
+### 1.11 合并索引文件
     sstable-tools mergeindexes baseindex index1 ...
 将索引文件index1...等进行合并到baseindex中，若baseindex不存在，则新创建一个索引文件并命名为baseindex。可以指定多个待合并的索引文件，每个索引文件以空间分隔。合并完成后，index1...等将被删除。
 
-### <span id="1.12">1.12 查看索引文件所包含记录的主键范围</span>
+### 1.12 查看索引文件所包含记录的主键范围
     sstable-tools tkrange [-n num] [-c|-s] index1...
 用于查看指定文件中所包含主键的token范围。在输出token范围时也可输出索引文件中前若干条记录的token值，此记录数由num指定，num默认为0，即不输出记录的具体token值。 -c及-s用于指示主键是单列组成的简单主键还是复合主键，-c表示复合主键，-s表示简单主键，默认为简单主键。index1...代表索引文件路径，多个文件间以空格分隔。
 
-### <span id="1.13">1.13 查看索引文件信息</span>
+### 1.13 查看索引文件信息
     sstable-tools indexinfo index1...
 查询索引文件信息，如索引文件记录数，字段数等。 index1...代表索引路径，多个索引间以空格分隔。
 
-### <span id="1.14">1.14 检测索引索引文件token分布</span>
+### 1.14 检测索引索引文件token分布
     sstable-tools indextkverify ks table
 
 检测给定ks及table在当前节点上索引文件的token分布情况，对于1）不应落在本节点上的数据及2）token范围计算错误等两种情况，给出告警，并在日志文件中给出处理命令。
 
-### <span id="1.15">1.15 检查索引文件状态</span>
+### 1.15 检查索引文件状态
     sstable-tools checkindex [-exorcise] [-crossCheckTermVectors] [-segment X] [-segment Y] [-dir-impl X] indexpath
 检测索引文件的状态，对于包含的异常情况进行告警，并可进行挽救性修复。在不使用-exorcise参数运行时，仅打开索引文件，输出版本信息及索引文件包含的异常信息，以及如果使用-exorcise运行时将采取的修复异常动作。
 
