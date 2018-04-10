@@ -11,12 +11,13 @@ SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具
 * [显示sstable中数据的时间戳范围 (timestamp)](#17-显示-sstable-中数据的时间戳范围)
 * [显示表在当前节点上的所有sstable文件(sstable)](#18-显示表在当前节点上的所有-sstable-文件)
 * [从C* 本地节点读取数据，需要指定十六进制形式的主键 (geth)](#19-从c-本地节点读取数据geth)
-* [从C* 本地节点读取数据，需要指定分区列的值，以clustering的列的值 (get)](#110-从c-本地节点读取数据get)
+* [从C* 本地节点读取数据，需要指定分区列的值，以及clustering的列的值 (get)](#110-从c-本地节点读取数据get)
 * [合并索引文件 (mergeindexes)](#111-合并索引文件)
 * [查看索引文件所包含记录的主键范围 (tkrange)](#112-查看索引文件所包含记录的主键范围)
 * [查看索引文件信息 (indexinfo)](#113-查看索引文件信息)
-* [检测索引索引文件token分布 (indextkverify)](#114-检测索引索引文件token分布)
+* [检测索引文件token分布 (indextkverify)](#114-检测索引文件token分布)
 * [检查索引文件状态 (checkindex)](#115-检查索引文件状态)
+* [删除过期数据 (rm)](#116-删除过期数据)
 
 ## 一、使用方法
 
@@ -237,7 +238,7 @@ Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
     sstable-tools indexinfo index1...
 查询索引文件信息，如索引文件记录数，字段数等。 index1...代表索引路径，多个索引间以空格分隔。
 
-### 1.14 检测索引索引文件token分布
+### 1.14 检测索引文件token分布
     sstable-tools indextkverify ks table
 
 检测给定ks及table在当前节点上索引文件的token分布情况，对于1）不应落在本节点上的数据及2）token范围计算错误等两种情况，给出告警，并在日志文件中给出处理命令。
@@ -260,6 +261,17 @@ Maximum timestamp: 1474892693221025 (2016-09-26 20:24:53)
 
   -dir-impl X:使用指定的FSDirectory实现，如果不指定此项参数，默认使用 org.apache.lucene.store
 
+### 1.16 删除过期数据
+sstable-tools rm
+用于将过期数据删除。
+执行此命令前，<font color=red>务必停止运行 mpp-engine 服务，即 nodetool drain && pkill -9 impalad。</font>
+需要在配置文件中配置以下参数，参数名与参数间使用冒号分隔，下同。
+
+| 参数名|含义|
+|:----------:|:-------:|
+|keyspace|待删除数据的 keyspace|
+|table|待删除数据的表名|
+|move_since|以秒为单位的时间戳，即对包含数据的最大<br>时间戳小于move_since的数据进行删除|
 
 ## 二、项目开发及构建
 本项目在jdk1.8 + IntelliJ环境下开发，使用[Apache Maven](https://maven.apache.org/)进行构建管理。

@@ -1,6 +1,7 @@
 package cn.ac.iie.drive;
 
 import cn.ac.iie.cassandra.CassandraUtils;
+import cn.ac.iie.delete.DeleteUtils;
 import cn.ac.iie.drive.commands.*;
 import cn.ac.iie.index.IndexFileHandler;
 import cn.ac.iie.migrate.MigrateUtils;
@@ -108,6 +109,7 @@ public class Driver {
             put("indexinfo","     indexinfo index1... , 输出索引文件信息，index1为索引文件路径，多个索引文件用空格间隔");
             put("indextkverify","");
             put("checkindex","    checkindex [-exorcise] [-crossCheckTermVectors] [-segment X] [-segment Y] [-dir-impl X] indexpath, 检测索引文件状态，修正索引中的异常");
+            put("rm","删除指定时间范围以前的C*数据");
         }
     };
     public static void printHelpInfo(){
@@ -162,6 +164,8 @@ public class Driver {
             return;
         }
         Signal.handle(new Signal("TERM"), new KillSignalHandler());
+        if(args.length!=0&&!args[0].equals("help"))
+            NoOP();
         if(args.length==0 || args[0].equals("help")){
             if(args.length>1){
                 if(cmdMap.containsKey(args[1])){
@@ -246,7 +250,6 @@ public class Driver {
             MigrateUtils.cleanUpMigrateDirs(ks,table,list);
             return;
         }else if(args.length>=1 && args[0].equals("geth")){
-            NoOP();
             if(args.length<4){
                 System.out.println("Missing paramers! "+cmdMap.get("geth"));
                 return;
@@ -255,7 +258,6 @@ public class Driver {
             System.exit(0);
             return;
         }else if(args.length>=1 && args[0].equals("get")){
-            NoOP();
             if(args.length<4){
                 System.out.println("Missing paramers! "+cmdMap.get("get"));
                 return;
@@ -312,7 +314,6 @@ public class Driver {
             }
             return;
         }else if(args.length>=1 && args[0].equals("indextkverify")){
-            NoOP();
             //ks,tb
             if(args.length<3){
                 System.err.println("Missing parameters! "+cmdMap.get("indextkverify"));
@@ -343,6 +344,9 @@ public class Driver {
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
+            return;
+        }else if(args.length>0 && args[0].equals("rm")) {
+            DeleteUtils.deleteData(args[1], args[2], Long.parseLong(args[3]));
             return;
         }
         @SuppressWarnings("unchecked")
