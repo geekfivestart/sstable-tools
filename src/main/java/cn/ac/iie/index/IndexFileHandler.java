@@ -9,6 +9,7 @@ import com.datastax.driver.core.Row;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
@@ -552,6 +553,8 @@ public class IndexFileHandler {
             return;
         }
 
+        if (DatabaseDescriptor.getPartitioner() == null)
+            DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
         Schema.instance.loadFromDisk(false);
         Keyspace.setInitialized();
         Keyspace.open("system");

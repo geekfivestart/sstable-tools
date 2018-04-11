@@ -10,10 +10,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.SetMultimap;
 import com.google.common.io.CharStreams;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.config.Config;
-import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.CFStatement;
@@ -127,6 +124,8 @@ public class CassandraUtils {
             return keyspaceMetadataMap.get(keyspaceName);
         } else{
             if(!loaded) {
+                if (DatabaseDescriptor.getPartitioner() == null)
+                    DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
                 Schema.instance.loadFromDisk(false);
                 loaded = true;
             }
@@ -234,15 +233,16 @@ public class CassandraUtils {
         }
         // 创建表元数据
         CFMetaData cfm;
+        ClientState clientState=ClientState.forInternalCalls();
         if(cfid != null) {
-            cfm = ((CreateTableStatement) statement.prepare().statement).metadataBuilder().withId(cfid).build();
+            cfm = ((CreateTableStatement) statement.prepare(clientState).statement).metadataBuilder().withId(cfid).build();
             KeyspaceMetadata prev = Schema.instance.getKSMetaData(keyspace);
             List<CFMetaData> tables = Lists.newArrayList(prev.tablesAndViews());
             tables.add(cfm);
             Schema.instance.setKeyspaceMetadata(prev.withSwapped(Tables.of(tables)));
             Schema.instance.load(cfm);
         } else {
-            cfm = ((CreateTableStatement) statement.prepare().statement).getCFMetaData();
+            cfm = ((CreateTableStatement) statement.prepare(clientState).statement).getCFMetaData();
         }
         return cfm;
     }
@@ -464,6 +464,8 @@ public class CassandraUtils {
     }
 
     public static void getlocalRecord(String ks,String tb,String pk,String ... ck){
+        if (DatabaseDescriptor.getPartitioner() == null)
+            DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
         Schema.instance.loadFromDisk(false);
         Keyspace.setInitialized();
         Keyspace.open("system");
@@ -507,6 +509,8 @@ public class CassandraUtils {
 
     public static void getlocalRecordByHex(String ks,String tb,String hex){
         ByteBuffer bb=ByteBufferUtil.hexToBytes(hex);
+        if (DatabaseDescriptor.getPartitioner() == null)
+            DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
         Schema.instance.loadFromDisk(false);
         Keyspace.setInitialized();
         Keyspace.open("system");
