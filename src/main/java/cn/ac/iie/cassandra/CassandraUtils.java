@@ -124,9 +124,7 @@ public class CassandraUtils {
             return keyspaceMetadataMap.get(keyspaceName);
         } else{
             if(!loaded) {
-                if (DatabaseDescriptor.getPartitioner() == null)
-                    DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
-                loadSystemKeyspace();
+                DatabaseDescriptor.daemonInitialization();
                 Schema.instance.loadFromDisk(false);
                 loaded = true;
             }
@@ -465,9 +463,7 @@ public class CassandraUtils {
     }
 
     public static void getlocalRecord(String ks,String tb,String pk,String ... ck){
-        if (DatabaseDescriptor.getPartitioner() == null)
-            DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
-        loadSystemKeyspace();
+        DatabaseDescriptor.daemonInitialization();
         Schema.instance.loadFromDisk(false);
         Keyspace.setInitialized();
         Keyspace.open("system");
@@ -511,9 +507,7 @@ public class CassandraUtils {
 
     public static void getlocalRecordByHex(String ks,String tb,String hex){
         ByteBuffer bb=ByteBufferUtil.hexToBytes(hex);
-        if (DatabaseDescriptor.getPartitioner() == null)
-            DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
-        loadSystemKeyspace();
+        DatabaseDescriptor.daemonInitialization();
         Schema.instance.loadFromDisk(false);
         Keyspace.setInitialized();
         Keyspace.open("system");
@@ -670,15 +664,5 @@ public class CassandraUtils {
                 ConsistencyLevel.ONE,
                 new QueryState(ClientState.forInternalCalls()));
                 */
-    }
-
-    public static void loadSystemKeyspace(){
-        DatabaseDescriptor.clientInitialization();
-        if(!Schema.instance.getKeyspaces().contains(SchemaKeyspace.metadata().name)){
-            Schema.instance.load(SchemaKeyspace.metadata());
-        }
-        if(!Schema.instance.getKeyspaces().contains(SystemKeyspace.metadata().name)){
-            Schema.instance.load(SystemKeyspace.metadata());
-        }
     }
 }

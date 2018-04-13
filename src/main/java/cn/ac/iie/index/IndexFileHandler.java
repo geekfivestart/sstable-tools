@@ -553,9 +553,7 @@ public class IndexFileHandler {
             return;
         }
 
-        if (DatabaseDescriptor.getPartitioner() == null)
-            DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
-        CassandraUtils.loadSystemKeyspace();
+        DatabaseDescriptor.daemonInitialization();
         Schema.instance.loadFromDisk(false);
         Keyspace.setInitialized();
         Keyspace.open("system");
