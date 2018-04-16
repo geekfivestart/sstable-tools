@@ -397,6 +397,7 @@ public class SSTableUtils {
         String s = color ? TableTransformer.ANSI_CYAN : "";
         String r = color ? TableTransformer.ANSI_RESET : "";
         if (new File(fName).exists()) {
+            DatabaseDescriptor.daemonInitialization();
             Descriptor descriptor = Descriptor.fromFilename(fName);
             Map<MetadataType, MetadataComponent> metadata = descriptor.getMetadataSerializer().deserialize(descriptor, EnumSet.allOf(MetadataType.class));
             StatsMetadata stats = (StatsMetadata) metadata.get(MetadataType.STATS);

@@ -1,6 +1,6 @@
 # SSTable Tools
 
-SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具，目前项目处于不断的开发中，当前仅在cassandra 3.8 环境中进行测试验证，在其它版本下运行可能出现不可预知情况。SSTable Tools具有如下功能：
+SSTable Tools是用于对mpp-engine系统中数据、索引进行管理的工具，目前项目处于不断的开发中，当前分枝在cassandra 3.11 环境中进行测试验证，在其它版本下运行可能出现不可预知情况。SSTable Tools具有如下功能：
 
 * [过期数据分离 (move)](#11-过期数据分离)
 * [过期索引分离 (moveindex)](#12-过期索引分离)
