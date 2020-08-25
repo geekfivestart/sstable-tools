@@ -7,6 +7,7 @@ import cn.ac.iie.index.IndexFileHandler;
 import cn.ac.iie.migrate.MigrateUtils;
 import cn.ac.iie.move.MoveUtils;
 import cn.ac.iie.utils.KillSignalHandler;
+import cn.ac.iie.utils.TokenUtil;
 import com.google.common.base.Strings;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
@@ -18,6 +19,7 @@ import sun.misc.Signal;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -109,7 +111,11 @@ public class Driver {
             put("indexinfo","     indexinfo index1... , 输出索引文件信息，index1为索引文件路径，多个索引文件用空格间隔");
             put("indextkverify","");
             put("checkindex","    checkindex [-exorcise] [-crossCheckTermVectors] [-segment X] [-segment Y] [-dir-impl X] indexpath, 检测索引文件状态，修正索引中的异常");
-            put("rm","删除指定时间范围以前的C*数据");
+            put("rm","删除指定时间范围以前的C*数据\n");
+            put("gettk","  gettk ks tb pk, 获取指定分区键的token值\n");
+            put("deldocfromindexfile", "    deldocfromindexfile indexfile ks tb pk ck...., 从索引文件中删除记录\n");
+            put("finddocfromindexfile", "    finddocfromindexfile indexfile ks tb pk ck...., 从索引文件中删除记录\n");
+            put("gettkinfocurrnode", "    gettkinfocurrnode ks, 查看当前节点的token信息\n");
         }
     };
     public static void printHelpInfo(){
@@ -140,6 +146,8 @@ public class Driver {
         sb.append("tkrange    查看索引文件主键token范围\n") ;
         sb.append("\t");
         sb.append("indexinfo  查看索引文件信息\n") ;
+        sb.append("\t");
+        sb.append("gettk      获取指定分区键的token值\n") ;
         sb.append("\t");
         sb.append("help <command> 显示每个命令的详情\n");
 
@@ -268,6 +276,17 @@ public class Driver {
             }
             CassandraUtils.getlocalRecord(args[1],args[2],args[3],params);
             System.exit(0);
+        }else if(args.length>=1 && args[0].equals("gettk")){
+            if(args.length<4){
+                System.out.println("Missing paramers! "+cmdMap.get("gettk"));
+                return;
+            }
+            String [] params=new String [args.length-3];
+            for(int i=3;i<args.length;++i){
+                params[i-3]=args[i];
+            }
+            CassandraUtils.getTokenValueForPartitionKey(args[1],args[2],params);
+            System.exit(0);
         }else if(args.length>=1 && args[0].equals("mergeindexes")){
             if(args.length<3){
                 System.err.println("Missing parameters! "+cmdMap.get("mergeindexes"));
@@ -347,6 +366,60 @@ public class Driver {
             return;
         }else if(args.length>0 && args[0].equals("rm")) {
             DeleteUtils.deleteData(args[1], args[2], Long.parseLong(args[3]));
+            return;
+        }else if(args.length>0 && args[0].equals("finddocfromindexfile")){
+            if(args.length<5){
+                System.err.println("Missing parameters! "+cmdMap.get("deldocfromindexfile"));
+                return;
+            }
+
+            String [] params=new String [args.length-5];
+            for(int i=5;i<args.length;++i){
+                params[i-5]=args[i];
+            }
+            try {
+                IndexFileHandler.findDocFromIndexFile(args[1],args[2],args[3],args[4],params);
+            } catch (NoSuchMethodException e) {
+                e.printStackTrace();
+            } catch (InvocationTargetException e) {
+                e.printStackTrace();
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            return;
+        }else if(args.length>0 && args[0].equals("deldocfromindexfile")){
+            if(args.length<5){
+                System.err.println("Missing parameters! "+cmdMap.get("deldocfromindexfile"));
+                return;
+            }
+
+            String [] params=new String [args.length-5];
+            for(int i=5;i<args.length;++i){
+                params[i-5]=args[i];
+            }
+            try {
+                IndexFileHandler.deleteDocFromIndexFile(args[1],args[2],args[3],args[4],params);
+            } catch (NoSuchMethodException e) {
+                e.printStackTrace();
+            } catch (InvocationTargetException e) {
+                e.printStackTrace();
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            return;
+        }else if(args.length>0 && args[0].equals("gettkinfocurrnode")){
+            if(args.length<2){
+                System.err.println("Missing parameters! "+cmdMap.get("gettkinfocurrnode"));
+                return;
+            }
+
+            CassandraUtils.getTokenInfo(args[1]);
+            System.out.println("LOCAL_TK_RANGE_KS:"+TokenUtil.LOCAL_TK_RANGE_KS);
+            System.out.println("KS_TOKEN_ENDPOINTS:"+TokenUtil.KS_TOKEN_ENDPOINTS);
             return;
         }
         @SuppressWarnings("unchecked")

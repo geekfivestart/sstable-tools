@@ -1,8 +1,11 @@
 package cn.ac.iie.cassandra;
 
 import cn.ac.iie.drive.Driver;
+import cn.ac.iie.schema.mapper.KeyMapper;
+import cn.ac.iie.schema.mapper.WideKeyMapper;
 import cn.ac.iie.sstable.SSTableUtils;
 import cn.ac.iie.utils.InvokeUtils;
+import cn.ac.iie.utils.TokenUtil;
 import com.google.common.base.Strings;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Lists;
@@ -26,6 +29,7 @@ import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.*;
@@ -34,13 +38,17 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.thrift.Column;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MurmurHash;
 import org.apache.cassandra.utils.btree.BTreeSet;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.util.BytesRef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.validation.constraints.NotNull;
 import java.io.*;
+import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -70,9 +78,9 @@ public class CassandraUtils {
      * 关闭不必要的后台任务
      * 该操作，忽略所有异常
      */
-    private static void shutdownBackgroundTasks() {
+    public static void shutdownBackgroundTasks() {
         try {
-            if(!Config.isClientMode()) {
+            if (!Config.isClientMode()) {
                 logger.info("{} task(s) in total，{} task(s) is running，{} task(s) completed",
                         ScheduledExecutors.optionalTasks.getTaskCount(),
                         ScheduledExecutors.optionalTasks.getActiveCount(),
@@ -106,7 +114,7 @@ public class CassandraUtils {
                     logger.error(e.getMessage(), e);
                 }
             }
-        } catch (Exception ignored){
+        } catch (Exception ignored) {
             logger.warn(ignored.getMessage(), ignored);
         }
     }
@@ -114,23 +122,25 @@ public class CassandraUtils {
     /**
      * 获取keyspace元数据，优先从缓存中获取，若未缓存则从集群中获取
      * 若集群中不存在该keyspace则抛出异常
+     *
      * @param keyspaceName keyspace名称
      * @return 返回keyspace元数据
      */
     private static KeyspaceMetadata keyspaceFromName(String keyspaceName) throws NoSuchKeyspaceException {
         // 由于没有对缓存进行初始化，因此需要在第一次获取某个keyspace时从集群中获取
         // 如此，可尽量减少不必要的缓存
-        if(keyspaceMetadataMap.containsKey(keyspaceName)){
+        if (keyspaceMetadataMap.containsKey(keyspaceName)) {
             return keyspaceMetadataMap.get(keyspaceName);
-        } else{
-            if(!loaded) {
+        } else {
+            if (!loaded) {
                 DatabaseDescriptor.daemonInitialization();
+                DatabaseDescriptor.setPartitionerUnsafe(FBUtilities.newPartitioner("org.apache.cassandra.dht.Murmur3Partitioner"));
                 Schema.instance.loadFromDisk(false);
                 loaded = true;
             }
             KeyspaceMetadata metadata = Schema.instance.getKSMetaData(keyspaceName);
             // 若集群中不存在相应的keyspace，则抛出运行时异常
-            if(metadata == null ){
+            if (metadata == null) {
                 logger.error("keyspace not exist: {}", keyspaceName);
                 throw new NoSuchKeyspaceException(String.format("keyspace not exist: %s", keyspaceName));
             }
@@ -144,20 +154,21 @@ public class CassandraUtils {
     /**
      * 根据keyspace及table名称获取表元数据，优先从缓存中获取元数据
      * 若缓存中不存在该元数据，则从keyspace获取
+     *
      * @param keyspaceName keyspace名称
-     * @param tableName table名称
+     * @param tableName    table名称
      * @return 返回表元数据
      */
     private static CFMetaData tableFromKeyspace(String keyspaceName, String tableName)
             throws NoSuchKeyspaceException, NoSuchTableException {
         // 由于缓存中key的格式为keyspace.table，因此需要将table名称装换成真正的table名
         String ksTableName = String.format("%s.%s", keyspaceName, tableName);
-        if(cfMetaDataMap.containsKey(ksTableName)){
+        if (cfMetaDataMap.containsKey(ksTableName)) {
             return cfMetaDataMap.get(ksTableName);
         }
         KeyspaceMetadata ksMetaData = keyspaceFromName(keyspaceName);
         CFMetaData tableMetaData = ksMetaData.getTableOrViewNullable(tableName);
-        if(tableMetaData == null){
+        if (tableMetaData == null) {
             logger.error("table not exist:{}", tableName);
             throw new NoSuchTableException(String.format("表不存在: %s", tableName));
         }
@@ -169,6 +180,7 @@ public class CassandraUtils {
 
     /**
      * 自动发现schema
+     *
      * @return 返回schema输入流
      * @throws IOException IO异常
      */
@@ -194,6 +206,7 @@ public class CassandraUtils {
 
     /**
      * 从cql中获取表元数据
+     *
      * @param source cql语句数据流
      * @return 返回表元数据
      * @throws IOException IO异常
@@ -204,8 +217,9 @@ public class CassandraUtils {
 
     /**
      * 从cql中获取表元数据
+     *
      * @param source cql输入流
-     * @param cfid 表id
+     * @param cfid   表id
      * @return 返回表元数据
      * @throws IOException IO异常，输入流读取失败时抛出该异常
      */
@@ -226,14 +240,14 @@ public class CassandraUtils {
         // 设置keyspace元数据，
         // 若keyspace元数据不存在则重新创建
         statement.prepareKeyspace(keyspace);
-        if(Schema.instance.getKSMetaData(keyspace) == null) {
+        if (Schema.instance.getKSMetaData(keyspace) == null) {
             Schema.instance.setKeyspaceMetadata(KeyspaceMetadata.create(keyspace, KeyspaceParams.local(), Tables.none(),
                     Views.none(), getTypes(), Functions.none()));
         }
         // 创建表元数据
         CFMetaData cfm;
-        ClientState clientState=ClientState.forInternalCalls();
-        if(cfid != null) {
+        ClientState clientState = ClientState.forInternalCalls();
+        if (cfid != null) {
             cfm = ((CreateTableStatement) statement.prepare(clientState).statement).metadataBuilder().withId(cfid).build();
             KeyspaceMetadata prev = Schema.instance.getKSMetaData(keyspace);
             List<CFMetaData> tables = Lists.newArrayList(prev.tablesAndViews());
@@ -248,8 +262,9 @@ public class CassandraUtils {
 
     /**
      * 根据keyspace及table名称获取SSTable文件
-     * @param keyspaceName keyspace名称
-     * @param tableName table名称
+     *
+     * @param keyspaceName        keyspace名称
+     * @param tableName           table名称
      * @param includeSymbolicLink 是否包含软连接
      * @return 返回SSTable文件列表
      */
@@ -265,7 +280,7 @@ public class CassandraUtils {
         directories.getCFDirectories().forEach(dir -> LifecycleTransaction.getFiles(dir.toPath(),
                 (file, fileType) -> fileType == Directories.FileType.FINAL
                         && file.getName().endsWith("Data.db")
-                        && (includeSymbolicLink ||!Files.isSymbolicLink(file.toPath())),
+                        && (includeSymbolicLink || !Files.isSymbolicLink(file.toPath())),
                 Directories.OnTxnErr.THROW).forEach(fileList::add));
         return fileList;
     }
@@ -275,14 +290,15 @@ public class CassandraUtils {
      * 首先从集群中获取表的元数据，
      * 然后从元数据中获取数据存储路径
      * 最后获取各个路径下的所有sstable
-     * @param keyspaceName keyspace名称
-     * @param tableName table名称
+     *
+     * @param keyspaceName  keyspace名称
+     * @param tableName     table名称
      * @param expiredSecond 冷化时间
      * @return 返回所有已冷化且为迁移的sstable
      */
     public static List<File> expiredSSTableFromName(String keyspaceName, String tableName, @NotNull Long expiredSecond)
             throws Exception {
-        Long maxEntireMicroSecond = (expiredSecond + maxWindowSizeSeconds(keyspaceName, tableName)) *  million;
+        Long maxEntireMicroSecond = (expiredSecond + maxWindowSizeSeconds(keyspaceName, tableName)) * million;
         Long nowTimestamp = System.currentTimeMillis() * 1000;
 
         CFMetaData metaData = tableFromName(keyspaceName, tableName);
@@ -311,9 +327,10 @@ public class CassandraUtils {
                 Directories.OnTxnErr.THROW).forEach(fileList::add));
         return fileList;
     }
+
     public static List<File> getSstableFromTime(String keyspaceName, String tableName, @NotNull Long expiredSecond)
             throws Exception {
-        Long maxEntireMicroSecond = (expiredSecond ) *  million;
+        Long maxEntireMicroSecond = (expiredSecond) * million;
 
         CFMetaData metaData = tableFromName(keyspaceName, tableName);
         Directories directories = new Directories(metaData, ColumnFamilyStore.getInitialDirectories());
@@ -345,8 +362,9 @@ public class CassandraUtils {
     /**
      * 获取某个table的合并最大时间窗口
      * 前提是该table的合并策略必须为DateTieredCompactionStrategy
+     *
      * @param keyspaceName keyspace名称
-     * @param tableName table名称
+     * @param tableName    table名称
      * @return 返回table的最大合并时间窗口
      */
     private static Long maxWindowSizeSeconds(String keyspaceName, String tableName)
@@ -355,12 +373,12 @@ public class CassandraUtils {
         // 获取最大合并时间窗口时优先从缓存中获取，若缓存中不存在则寻找相应的表元数据，
         // 然后从表元数据中获取该时间窗口，同时将该值加入缓存中
         String ksTableName = String.format("%s.%s", keyspaceName, tableName);
-        if(maxWindowSizeSecondsMap.containsKey(ksTableName)){
+        if (maxWindowSizeSecondsMap.containsKey(ksTableName)) {
             return maxWindowSizeSecondsMap.get(ksTableName);
         }
         CFMetaData metaData = tableFromKeyspace(keyspaceName, tableName);
-        logger.info("compaction class:{}",metaData.params.compaction.klass().getName());
-        if(DateTieredCompactionStrategy.class.isAssignableFrom(metaData.params.compaction.klass())) {
+        logger.info("compaction class:{}", metaData.params.compaction.klass().getName());
+        if (DateTieredCompactionStrategy.class.isAssignableFrom(metaData.params.compaction.klass())) {
             // 如果合并策略设置为DateTieredCompactionStrategy，则元数据中应包含max_window_size_seconds
             // 若不包含该属性，则有可能是集群出现问题，应首先检查集群健康状态及相关keyspace与table状态
 
@@ -373,27 +391,27 @@ public class CassandraUtils {
             } else {
                 throw new Exception("Property [max_window_size_seconds] not exist，please check the schema");
             }
-        } else if(TimeWindowCompactionStrategy.class.isAssignableFrom(metaData.params.compaction.klass())){
+        } else if (TimeWindowCompactionStrategy.class.isAssignableFrom(metaData.params.compaction.klass())) {
             // 如果合并策略设置为TimeWindowCompactionStrategy，
             // 则元数据中应包含compaction_window_size及compaction_window_unit
             Map<String, String> params = metaData.params.compaction.options();
             String size;
             String unit;
-            logger.info("params:{}",params.toString());
+            logger.info("params:{}", params.toString());
             if (params.containsKey("compaction_window_size")) {
                 size = params.get("compaction_window_size");
             } else {
-                size="1";
+                size = "1";
                 //throw new Exception("Property [compaction_window_size] not exist，please check the schema");
             }
-            if(params.containsKey("compaction_window_unit")){
+            if (params.containsKey("compaction_window_unit")) {
                 unit = params.get("compaction_window_unit");
-            } else{
-                unit="DAYS";
+            } else {
+                unit = "DAYS";
                 //throw new Exception("Property [compaction_window_unit] not exist，please check the schema");
             }
             Long secondDigit;
-            switch (unit){
+            switch (unit) {
                 case "MINUTES":
                     secondDigit = Long.parseLong(size) * 60;
                     break;
@@ -401,7 +419,7 @@ public class CassandraUtils {
                     secondDigit = Long.parseLong(size) * 3600;
                     break;
                 case "DAYS":
-                    secondDigit= Long.parseLong(size) * 86400;
+                    secondDigit = Long.parseLong(size) * 86400;
                     break;
                 default:
                     throw new Exception(String.format("[compaction_window_unit not] not correct：%s", unit));
@@ -410,12 +428,13 @@ public class CassandraUtils {
             return secondDigit;
         } else {
             throw new Exception(String.format("DateTieredCompactionStrategy、TimeWindowCompactionStrategy expected for %s.%s, " +
-                            "rather than %s", keyspaceName, tableName, InvokeUtils.genericSuperclass(metaData.params.compaction.klass())));
+                    "rather than %s", keyspaceName, tableName, InvokeUtils.genericSuperclass(metaData.params.compaction.klass())));
         }
     }
 
     /**
      * 根据SSTable文件获取该文件中的记录的最大时间戳
+     *
      * @param ssTablePath SSTable文件路径
      * @return 返回最大时间戳
      */
@@ -426,14 +445,15 @@ public class CassandraUtils {
             throw new Exception(String.format("The timestamp of %s is not correct", ssTablePath));
         }
         //logger.info("STable：{} MaxTimestamp：{}({})",
-         //       ssTablePath, maxTimestamp, SSTableUtils.toDateString(maxTimestamp, TimeUnit.MICROSECONDS, false));
+        //       ssTablePath, maxTimestamp, SSTableUtils.toDateString(maxTimestamp, TimeUnit.MICROSECONDS, false));
         return maxTimestamp;
     }
 
     /**
      * 根据keyspace及table名称获取表元数据
+     *
      * @param keyspaceName keyspace名称
-     * @param tableName table名称
+     * @param tableName    table名称
      * @return 返回表元数据
      */
     private static CFMetaData tableFromName(String keyspaceName, String tableName)
@@ -446,6 +466,7 @@ public class CassandraUtils {
      * 获取支持的类型。
      * 若预先定义的已知类型集合为空，则直接返回NONE类型；
      * 否则则根据已知类型集合设置支持的类型
+     *
      * @return 返回支持的类型
      */
     public static Types getTypes() {
@@ -462,111 +483,158 @@ public class CassandraUtils {
         return table.cfName + "-" + ByteBufferUtil.bytesToHex(ByteBufferUtil.bytes(table.cfId));
     }
 
-    public static void getlocalRecord(String ks,String tb,String pk,String ... ck){
+    public static void getlocalRecord(String ks, String tb, String pk, String... ck) {
         DatabaseDescriptor.daemonInitialization();
         Schema.instance.loadFromDisk(false);
         Keyspace.setInitialized();
         Keyspace.open("system");
         Keyspace.open("system_schema");
-        Collection<ColumnFamilyStore> cfsColl=Keyspace.open(ks).getColumnFamilyStores();
-        ColumnFamilyStore cfs=null;
-        for(ColumnFamilyStore cf:cfsColl){
-            if(cf.name.equals(tb))
-                cfs=cf;
+        Collection<ColumnFamilyStore> cfsColl = Keyspace.open(ks).getColumnFamilyStores();
+        ColumnFamilyStore cfs = null;
+        for (ColumnFamilyStore cf : cfsColl) {
+            if (cf.name.equals(tb))
+                cfs = cf;
         }
-        DecoratedKey dk=null;
-        NavigableSet<Clustering> navCluster=null;
-        CFMetaData cfm=null;
-        cfm=Schema.instance.getCFMetaData(ks,tb);
-        if(cfm.clusteringColumns().size()>0){
-            ByteBuffer l=ByteBufferUtil.bytes(pk);
-            dk=new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(l),l);
+        DecoratedKey dk = null;
+        NavigableSet<Clustering> navCluster = null;
+        CFMetaData cfm = null;
+        cfm = Schema.instance.getCFMetaData(ks, tb);
+        if (cfm.clusteringColumns().size() > 0) {
+            ByteBuffer l = ByteBufferUtil.bytes(pk);
+            dk = new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(l), l);
             NavigableSet<Clustering> sortedClusterings = new TreeSet<>(cfs.metadata.comparator);
-            for(String c:ck){
-                ByteBuffer cl=ByteBufferUtil.bytes(c);
+            for (String c : ck) {
+                ByteBuffer cl = ByteBufferUtil.bytes(c);
                 sortedClusterings.addAll(Arrays.asList(Clustering.make(cl)));
             }
-            navCluster=sortedClusterings;
-        }else{
-            ByteBuffer l=ByteBufferUtil.bytes(pk);
-            dk=new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(l),l);
-            navCluster= BTreeSet.of(cfs.metadata.comparator,Clustering.EMPTY);
+            navCluster = sortedClusterings;
+        } else {
+            ByteBuffer l = ByteBufferUtil.bytes(pk);
+            dk = new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(l), l);
+            navCluster = BTreeSet.of(cfs.metadata.comparator, Clustering.EMPTY);
         }
-        System.out.println("kd:"+dk+" clustering:"+navCluster);
-        final CFMetaData tmpcfm=cfm;
-        int[] count=new int[1];
-        printPartitionKey(tmpcfm,dk);
-        read(cfs,dk,navCluster,(int)System.currentTimeMillis()/1000).
-                forEachRemaining(Unfiltered->{
-                    System.out.println("row:"+Unfiltered.toString(tmpcfm));
+        System.out.println("kd:" + dk + " clustering:" + navCluster);
+
+        KeyMapper keyMapper = null;
+        try {
+            if (cfm.clusteringColumns().size() > 0) {
+                //clustering column exists in primary key
+                keyMapper = new WideKeyMapper(cfs.metadata);
+                ByteBuffer[] ckbs = new ByteBuffer[ck.length];
+                int i = 0;
+                for (String c : ck) {
+                    ckbs[i++] = ByteBufferUtil.bytes(c);
+                }
+                Clustering clustering = Clustering.make(ckbs);
+                Class clazz = keyMapper.getClass();
+                Method method = clazz.getDeclaredMethod("bytesRef", DecoratedKey.class, Clustering.class);
+                method.setAccessible(true);
+                BytesRef bytesRef = (BytesRef) method.invoke(keyMapper, dk, clustering);
+                System.out.println("hex of _key:"+ByteBufferUtil.bytesToHex(ByteBuffer.wrap(bytesRef.bytes)));
+            } else {
+                //fix later
+                keyMapper = new KeyMapper(cfs.metadata);
+            }
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+            logger.error(e.getMessage(), e);
+        }
+
+        final CFMetaData tmpcfm = cfm;
+        int[] count = new int[1];
+        printPartitionKey(tmpcfm, dk);
+        read(cfs, dk, navCluster, (int) System.currentTimeMillis() / 1000).
+                forEachRemaining(Unfiltered -> {
+                    System.out.println("row:" + Unfiltered.toString(tmpcfm));
                     count[0]++;
                 });
-        System.out.println("record Count:"+count[0]);
+        System.out.println("record Count:" + count[0]);
         shutdownBackgroundTasks();
     }
 
-    public static void getlocalRecordByHex(String ks,String tb,String hex){
-        ByteBuffer bb=ByteBufferUtil.hexToBytes(hex);
+    public static void getlocalRecordByHex(String ks, String tb, String hex) {
+        ByteBuffer bb = ByteBufferUtil.hexToBytes(hex);
         DatabaseDescriptor.daemonInitialization();
         Schema.instance.loadFromDisk(false);
         Keyspace.setInitialized();
         Keyspace.open("system");
         Keyspace.open("system_schema");
-        Collection<ColumnFamilyStore> cfsColl=Keyspace.open(ks).getColumnFamilyStores();
-        ColumnFamilyStore cfs=null;
-        for(ColumnFamilyStore cf:cfsColl){
-            if(cf.name.equals(tb))
-                cfs=cf;
+        Collection<ColumnFamilyStore> cfsColl = Keyspace.open(ks).getColumnFamilyStores();
+        ColumnFamilyStore cfs = null;
+        for (ColumnFamilyStore cf : cfsColl) {
+            if (cf.name.equals(tb))
+                cfs = cf;
         }
-        DecoratedKey dk=null;
-        NavigableSet<Clustering> navCluster=null;
-        CFMetaData cfm=null;
-        cfm=Schema.instance.getCFMetaData(ks,tb);
-        if(cfm.clusteringColumns().size()>0){
-            ByteBuffer [] l=split(bb,2);
-            dk=new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(l[0]),l[0]);
-            ByteBuffer [] cl=split(l[1],cfm.clusteringColumns().size());
+        DecoratedKey dk = null;
+        NavigableSet<Clustering> navCluster = null;
+        CFMetaData cfm = null;
+        cfm = Schema.instance.getCFMetaData(ks, tb);
+        if (cfm.clusteringColumns().size() > 0) {
+            ByteBuffer[] l = split(bb, 2);
+            dk = new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(l[0]), l[0]);
+            ByteBuffer[] cl = split(l[1], cfm.clusteringColumns().size());
             NavigableSet<Clustering> sortedClusterings = new TreeSet<>(cfs.metadata.comparator);
             if (cl.length > 0) {
                 sortedClusterings.addAll(Arrays.asList(Clustering.make(cl)));
             }
-            navCluster=sortedClusterings;
-        }else{
-            dk=new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(bb),bb);
-            navCluster= BTreeSet.of(cfs.metadata.comparator,Clustering.EMPTY);
+            navCluster = sortedClusterings;
+        } else {
+            dk = new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(bb), bb);
+            navCluster = BTreeSet.of(cfs.metadata.comparator, Clustering.EMPTY);
         }
-        System.out.println("kd:"+dk+" clustering:"+navCluster);
-        final CFMetaData tmpcfm=cfm;
-        int[] count=new int[1];
-        printPartitionKey(tmpcfm,dk);
-        read(cfs,dk,navCluster,(int)System.currentTimeMillis()/1000).
-                forEachRemaining(Unfiltered->{
-                    System.out.println("row:"+Unfiltered.toString(tmpcfm));
+        System.out.println("dk:" + dk + " clustering:" + navCluster);
+        final CFMetaData tmpcfm = cfm;
+        int[] count = new int[1];
+        printPartitionKey(tmpcfm, dk);
+        read(cfs, dk, navCluster, (int) System.currentTimeMillis() / 1000).
+                forEachRemaining(Unfiltered -> {
+                    System.out.println("row:" + Unfiltered.toString(tmpcfm));
                     count[0]++;
                 });
-        System.out.println("record Count:"+count[0]);
+        System.out.println("record Count:" + count[0]);
         shutdownBackgroundTasks();
     }
 
-    private static void printPartitionKey(CFMetaData cfm,DecoratedKey key){
+    public static void getTokenValueForPartitionKey(String ks, String tb, String... pk) {
+        if (pk.length == 1) {
+            ByteBuffer l = ByteBufferUtil.bytes(pk[0]);
+            DecoratedKey dk = new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(l), l);
+            System.out.println("token for " + pk[0] + " is:" + dk.getToken().toString());
+        } else {
+            DatabaseDescriptor.daemonInitialization();
+            Schema.instance.loadFromDisk(false);
+            Keyspace.setInitialized();
+            Keyspace.open("system");
+            Keyspace.open("system_schema");
+            Keyspace kss = Keyspace.open(ks);
+            CFMetaData cfm = Schema.instance.getCFMetaData(ks, tb);
+            AbstractType<?> partitionType = cfm.getKeyValidator();
+            ByteBuffer bf = ((CompositeType) partitionType).decompose(pk);
+            DecoratedKey dk = new BufferDecoratedKey(Murmur3Partitioner.instance.getToken(bf), bf);
+            System.out.println("token for " + pk + " is:" + dk.getToken().toString());
+        }
+
+    }
+
+    private static void printPartitionKey(CFMetaData cfm, DecoratedKey key) {
         List<ColumnDefinition> columnDefinitions = cfm.partitionKeyColumns();
-        AbstractType<?> partitionType=cfm.getKeyValidator();
+        AbstractType<?> partitionType = cfm.getKeyValidator();
         ByteBuffer[] components = partitionType instanceof CompositeType
                 ? ((CompositeType) partitionType).split(key.getKey())
                 : new ByteBuffer[]{key.getKey()};
 
-        for(ColumnDefinition cdf:columnDefinitions){
+        for (ColumnDefinition cdf : columnDefinitions) {
             String name = cdf.name.toString();
             ByteBuffer value = components[cdf.position()];
             AbstractType<?> valueType = cdf.cellValueType();
-            Object va=compose(value,valueType);
-            System.out.println(name+":"+va);
+            Object va = compose(value, valueType);
+            System.out.println(name + ":" + va);
         }
     }
 
-    public static Object compose(ByteBuffer value, AbstractType<?> type){
-        if(type instanceof SimpleDateType){
-            return ((SimpleDateType)type).toTimeInMillis(value);
+    public static Object compose(ByteBuffer value, AbstractType<?> type) {
+        if (type instanceof SimpleDateType) {
+            return ((SimpleDateType) type).toTimeInMillis(value);
         }
         return type.compose(value);
     }
@@ -579,13 +647,12 @@ public class CassandraUtils {
         SinglePartitionReadCommand cmd = SinglePartitionReadCommand.create(
                 table.metadata, nowInSec, key, columnFilter, filter);
         ReadExecutionController controller = ReadUtil.controller(cmd);
-        UnfilteredRowIterator it =  cmd.queryMemtableAndDisk(table, controller);
+        UnfilteredRowIterator it = cmd.queryMemtableAndDisk(table, controller);
         controller.close();
         return it;
     }
 
-    private static boolean readStatic(ByteBuffer bb)
-    {
+    private static boolean readStatic(ByteBuffer bb) {
         if (bb.remaining() < 2)
             return false;
 
@@ -597,50 +664,44 @@ public class CassandraUtils {
         return true;
     }
 
-    public static ByteBuffer[] split(ByteBuffer name,int size)
-    {
+    public static ByteBuffer[] split(ByteBuffer name, int size) {
         // Assume all components, we'll trunk the array afterwards if need be, but
         // most names will be complete.
         ByteBuffer[] l = new ByteBuffer[size];
         ByteBuffer bb = name.duplicate();
         readStatic(bb);
         int i = 0;
-        while (bb.remaining() > 0)
-        {
+        while (bb.remaining() > 0) {
             l[i++] = ByteBufferUtil.readBytesWithShortLength(bb);
             bb.get(); // skip end-of-component
         }
         return i == l.length ? l : Arrays.copyOfRange(l, 0, i);
     }
 
-    public static SetMultimap<InetAddress, Token> loadTokens(String dc)
-    {
+    public static SetMultimap<InetAddress, Token> loadTokens(String dc) {
         SetMultimap<InetAddress, Token> tokenMap = HashMultimap.create();
-        for (UntypedResultSet.Row row : executeInternal("SELECT peer, tokens,data_center FROM system.peers"))
-        {
+        for (UntypedResultSet.Row row : executeInternal("SELECT peer, tokens,data_center FROM system.peers")) {
             InetAddress peer = row.getInetAddress("peer");
-            if (row.has("tokens")&& row.getString("data_center").equals(dc))
+            if (row.has("tokens") && row.getString("data_center").equals(dc))
                 tokenMap.putAll(peer, deserializeTokens(row.getSet("tokens", UTF8Type.instance)));
         }
 
         return tokenMap;
     }
 
-    public static Map<InetAddress,String> loadRackForDC(String dc){
-        Map<InetAddress,String> inetToRack=new HashMap<>();
-        for (UntypedResultSet.Row row : executeInternal("SELECT peer, rack,data_center FROM system.peers"))
-        {
+    public static Map<InetAddress, String> loadRackForDC(String dc) {
+        Map<InetAddress, String> inetToRack = new HashMap<>();
+        for (UntypedResultSet.Row row : executeInternal("SELECT peer, rack,data_center FROM system.peers")) {
             InetAddress peer = row.getInetAddress("peer");
-            if (row.has("rack")&& row.getString("data_center").equals(dc))
-                inetToRack.put(peer,row.getString("rack"));
+            if (row.has("rack") && row.getString("data_center").equals(dc))
+                inetToRack.put(peer, row.getString("rack"));
         }
 
         return inetToRack;
     }
 
-    public static String getCurrentNodeRack(){
-        for (UntypedResultSet.Row row : executeInternal("SELECT peer, rack,data_center FROM system.peers"))
-        {
+    public static String getCurrentNodeRack() {
+        for (UntypedResultSet.Row row : executeInternal("SELECT peer, rack,data_center FROM system.peers")) {
             InetAddress peer = row.getInetAddress("peer");
             if (row.has("rack"))
                 return row.getString("rack");
@@ -648,8 +709,7 @@ public class CassandraUtils {
         return null;
     }
 
-    private static Collection<Token> deserializeTokens(Collection<String> tokensStrings)
-    {
+    private static Collection<Token> deserializeTokens(Collection<String> tokensStrings) {
         Token.TokenFactory factory = StorageService.instance.getTokenFactory();
         List<Token> tokens = new ArrayList<>(tokensStrings.size());
         for (String tk : tokensStrings)
@@ -660,9 +720,21 @@ public class CassandraUtils {
 
     public static UntypedResultSet executeQuery(String cql) {
         return executeInternal(cql);
-        /*return QueryProcessor.execute(cql,
+        /*return/ QueryProcessor.execute(cql,
                 ConsistencyLevel.ONE,
                 new QueryState(ClientState.forInternalCalls()));
                 */
     }
+
+    public static void getTokenInfo(String ks){
+        DatabaseDescriptor.daemonInitialization();
+        Schema.instance.loadFromDisk(false);
+        Keyspace.setInitialized();
+        Keyspace.open("system");
+        Keyspace.open("system_schema");
+        Keyspace kss = Keyspace.open(ks);
+
+        cn.ac.iie.utils.TokenUtil.mayInit(kss);
+    }
+
 }

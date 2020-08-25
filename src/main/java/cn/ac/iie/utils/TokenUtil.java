@@ -38,25 +38,25 @@ public class TokenUtil {
     /**
      * token range and endpoints map each keyspace owns
      */
-    private static final Map<String, ConcurrentHashMap<Range<Token>, List<InetAddress>>> KS_TOKEN_ENDPOINTS = new ConcurrentHashMap<>();
+    public static final Map<String, ConcurrentHashMap<Range<Token>, List<InetAddress>>> KS_TOKEN_ENDPOINTS = new ConcurrentHashMap<>();
     /**
      * data centers each keyspace owns
      */
-    private static final Map<String, List<String>> KS_DC = new ConcurrentHashMap<>();
+    public static final Map<String, List<String>> KS_DC = new ConcurrentHashMap<>();
 
-    private static final Map<String, Set<String>> KS_DC_SET = new ConcurrentHashMap<>();
+    public static final Map<String, Set<String>> KS_DC_SET = new ConcurrentHashMap<>();
     /**
      * endpoints each dc owns
      */
-    private static final Map<String, Set<InetAddress>> DC_ENDPOINTS = new ConcurrentHashMap<>();
+    public static final Map<String, Set<InetAddress>> DC_ENDPOINTS = new ConcurrentHashMap<>();
     /**
      * token range and endpoints map each dc owns
      */
-    private static final Map<String, ConcurrentHashMap<Range<Token>, List<InetAddress>>> DC_TOKEN_ENDPOINTS = new ConcurrentHashMap<>();
+    public static final Map<String, ConcurrentHashMap<Range<Token>, List<InetAddress>>> DC_TOKEN_ENDPOINTS = new ConcurrentHashMap<>();
     /**
      * token to endpoint map sorted by token
      */
-    private static final Map<Token, InetAddress> SORTED_TOKEN_TO_ENDPOINT = new LinkedHashMap<>();
+    public static final Map<Token, InetAddress> SORTED_TOKEN_TO_ENDPOINT = new LinkedHashMap<>();
     /**
      * token ranges each endpoint owns
      */
@@ -406,14 +406,15 @@ public class TokenUtil {
         Long peersCount = getCount(cql);
 
         LOG.info("I know there are {} endpoints in this cluster.", peersCount+1);
+        int failCount=10;
         while (true) {
             Map<Token, InetAddress> map = StorageService.instance.getTokenMetadata()
                     .getNormalAndBootstrappingTokenToEndpointMap();
             int endpointCount = map.values().stream()
                     .map(InetAddress::getHostAddress)
                     .collect(Collectors.toSet()).size();
-            if (peersCount != endpointCount - 1) {
-                LOG.warn("can't read all endpoints, please wait 1s");
+            if (peersCount != endpointCount - 1 && failCount-->0) {
+                LOG.warn("can't read all endpoints, please wait 1s, Expect "+(peersCount+1)+", but goet "+endpointCount);
             } else {
                 LOG.info("got normal range endpoints: {}", map);
                 return map;
