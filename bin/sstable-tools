@@ -125,7 +125,22 @@ exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
         -Dorg.quartz.properties="$quartz_properties" \
         -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
         cn.ac.iie.drive.Driver $1 $keyspace $table $move_since <&- &
-
+elif [ "x$1" == xsstabledump ]; then
+exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
+        -Dcassandra.storagedir="$cassandra_storagedir" \
+        -Dcassandra.logdir="$CASSANDRA_HOME/logs" \
+        -Dorg.quartz.properties="$quartz_properties" \
+        -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
+        -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 \
+        cn.ac.iie.sstable.SSTableExport "$@" <&- &
+elif [ "x$1" == xcompact ]; then
+exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
+        -Dcassandra.storagedir="$cassandra_storagedir" \
+        -Dcassandra.logdir="$CASSANDRA_HOME/logs" \
+        -Dorg.quartz.properties="$quartz_properties" \
+        -Dlogback.configurationFile=$CASSANDRA_HOME/conf/logback-sstable.xml \
+        -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 \
+        cn.ac.iie.sstable.UserDefinedCompact "$@" <&- &
 else
 exec "$JAVA" $JAVA_AGENT -ea -cp "$CLASSPATH" -Xmx$MAX_HEAP_SIZE \
         -Dcassandra.storagedir="$cassandra_storagedir" \
