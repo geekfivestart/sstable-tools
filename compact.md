@@ -1,4 +1,4 @@
-# compact 
+﻿# compact 
 将cassandra 产生的sstable文件进行合并，合并完成后在输出目录产生一个新的sstable文件，原始的sstable文件会被删除。**勿直接在线上cassandra的数据目内合并sstable,为安全考虑需要先待合并的sstable复制到其它的目录，再执行合并操作。**
 
 ---
